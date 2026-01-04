@@ -11,7 +11,7 @@ pub const TaskDef = task.TaskDef;
 var zico_instance: ?*anyopaque = null;
 var schedule_fn: ?*const fn () void = null;
 
-const ClobbersYield = .{
+pub const ClobbersYield = .{
     .memory = true,
     .x1 = true,
     .x2 = true,
@@ -29,7 +29,7 @@ const ClobbersYield = .{
     .x14 = true,
     .x15 = true,
 };
-const ClobbersArgs = .{
+pub const ClobbersArgs = .{
     .memory = true,
     .x2 = true,
     .x3 = true,
@@ -111,16 +111,19 @@ pub const TSS = struct {
     }
 };
 
+const ZicoHeader = struct {
+    tasks: []TSS,
+};
+
 /// Wakes a task by its ID, setting its state to ready.
 /// This is intended for use by synchronization primitives.
 pub fn wakeTask(task_id: u8) void {
-    const zico: *anyopaque = zico_instance orelse return;
-    // This is a bit of a hack. We need the concrete scheduler type to access its `tasks` field.
-    // Since this is a generic function, we can't know the type directly.
-    // However, we know all instantiations of `Zico` have a `tasks: []TSS` field at the same offset.
-    // This is unsafe and relies on implementation details.
-    const ZicoStruct = @TypeOf(zico).?.Pointer.child;
-    const scheduler: *ZicoStruct = @ptrCast(@alignCast(zico));
+    // Safely get a pointer to the active scheduler instance.
+    const zico_ptr = zico_instance orelse return;
+    // Cast the opaque pointer to a pointer to our known header structure.
+    // This is safe because `tasks` is the first field in the `Zico` struct.
+    const scheduler: *ZicoHeader = @ptrCast(@alignCast(zico_ptr));
+
     if (task_id < scheduler.tasks.len) {
         scheduler.tasks[task_id].setState(.ready);
     }
@@ -256,13 +259,25 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
                 },
                 .channel_send => {
                     const current_task_ref = &self.tasks[self.current_task];
+                    const header_ptr: *message.ChannelHeader = @ptrFromInt(ecall_arg);
+                    
+                    header_ptr.send_wait_queue.enqueue(self.current_task) catch |err| {
+                        std.log.err("failed to enqueue sender: {}", .{err});
+                    };
+
                     current_task_ref.setState(.waiting_on_channel_send);
-                    current_task_ref.wait_obj = @ptrFromInt(ecall_arg);
+                    current_task_ref.wait_obj = header_ptr;
                 },
                 .channel_receive => {
                     const current_task_ref = &self.tasks[self.current_task];
+                    const header_ptr: *message.ChannelHeader = @ptrFromInt(ecall_arg);
+
+                    header_ptr.recv_wait_queue.enqueue(self.current_task) catch |err| {
+                        std.log.err("failed to enqueue receiver: {}", .{err});
+                    };
+
                     current_task_ref.setState(.waiting_on_channel_receive);
-                    current_task_ref.wait_obj = @ptrFromInt(ecall_arg);
+                    current_task_ref.wait_obj = header_ptr;
                 },
             }
 
