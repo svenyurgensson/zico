@@ -3,6 +3,9 @@ const hal = @import("hal");
 const svd = @import("svd");
 const PFIC = svd.peripherals.PFIC;
 const task = @import("./task.zig");
+const message = @import("./message.zig");
+
+pub const Channel = message.Channel;
 pub const TaskDef = task.TaskDef;
 
 var zico_instance: ?*anyopaque = null;
@@ -326,7 +329,7 @@ pub const Semaphore = struct {
                 :
                 : [sem_wait_type] "i" (@intFromEnum(EcallType.sem_wait)),
                   [sem_ptr] "r" (self),
-                : ClobbersYield);
+                : ClobbersArgs);
         }
     }
 
@@ -336,7 +339,7 @@ pub const Semaphore = struct {
             :
             : [sem_signal_type] "i" (@intFromEnum(EcallType.sem_signal)),
               [sem_ptr] "r" (self),
-            : ClobbersYield);
+            : ClobbersArgs);
     }
 };
 
@@ -344,7 +347,7 @@ pub fn switchTaskISR() callconv(.naked) void {
     asm volatile ("jal ra, %[scheduler]\n" ++ "mret"
         :
         : [scheduler] "i" (scheduleNextTask),
-        : .memory);
+        : .{ .memory = true });
 }
 
 export fn scheduleNextTask() void {

@@ -64,7 +64,6 @@ pub const interrupts: hal.interrupts.VectorTable = .{
 pub fn main() !void {
     const clock = hal.clock.setOrGet(.hsi_max);
     hal.time.init(clock);
-    hal.debug.init(clock); // Initialize debug logging
 
     scheduler = Scheduler.init();
 
