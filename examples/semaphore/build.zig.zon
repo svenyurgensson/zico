@@ -1,5 +1,5 @@
 .{
-    .name = "semaphore",
+    .name = .semaphore,
     .version = "0.0.1",
     .dependencies = .{
         .ch32 = .{

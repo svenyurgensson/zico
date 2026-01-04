@@ -323,11 +323,75 @@ const AppTaskDefs = [_]zico.TaskDef{
 // ... main function and scheduler setup ...
 ```
 
+## Message Channels
+
+`zico` provides generic, fixed-size channels for thread-safe message passing between tasks.
+
+### `zico.Channel(comptime T: type, comptime size: usize) type`
+
+This is a comptime-generic function that returns a `Channel` type configured for a specific message type `T` and buffer `size`.
+
+### `channel.init() Self`
+
+Initializes a new channel instance.
+
+### `channel.send(message: T)`
+
+Sends a `message` to the channel. If the channel's buffer is full, the calling task will block until space becomes available.
+
+### `channel.receive() T`
+
+Receives a message from the channel. If the channel's buffer is empty, the calling task will block until a message is sent.
+
+### Example: Sender-Receiver
+
+Here's how to use a channel for communication between a sender and a receiver task.
+
+```zig
+const std = @import("std");
+const zico = @import("zico");
+const hal = @import("hal");
+
+// Define a channel that can hold 4 `u8` messages.
+var data_channel = zico.Channel(u8, 4).init();
+
+// Sender task
+fn sender_task() void {
+    var count: u8 = 0;
+    while (true) {
+        data_channel.send(count) catch |err| {
+            std.log.err("Sender error: {}", .{err});
+        };
+        std.log.info("Sent: {}", .{count});
+        count += 1;
+        scheduler.delay(300); // Send every 300ms
+    }
+}
+
+// Receiver task
+fn receiver_task() void {
+    while (true) {
+        const received_value = data_channel.receive() catch |err| {
+            std.log.err("Receiver error: {}", .{err});
+            continue;
+        };
+        std.log.warn("Received: {}", .{received_value});
+        scheduler.delay(1000); // Process every 1000ms
+    }
+}
+
+const AppTaskDefs = [_]zico.TaskDef{
+    .{ .name = "sender", .func = &sender_task },
+    .{ .name = "receiver", .func = &receiver_task },
+};
+
+// ... main function and scheduler setup ...
+```
 
 <!-- LICENSE -->
 ## License
 
-Distributed under the MIT License. See `LICENSE.txt` for more information.
+Distributed under the MIT License. See [LICENSE.txt](./LICENSE.txt) for more information.
 
 
 
