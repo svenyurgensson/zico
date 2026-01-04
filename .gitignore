@@ -1,0 +1,7 @@
+xpacks/
+.zig-cache/
+zig-out/
+tmp/
+docs/
+GEMINI.md
+mise.toml

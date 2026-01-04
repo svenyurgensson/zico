@@ -1,0 +1,339 @@
+# zico - A Stackless Coroutine Scheduler for RISC-V
+
+`zico` is a lightweight, stackless coroutine (task) scheduler designed for resource-constrained microcontrollers, specifically targeting the CH32V003 RISC-V MCU. It is designed to be used in conjunction with the `ch32_zig` Hardware Abstraction Layer (HAL) library.
+
+It provides a simple, cooperative multitasking environment with minimal memory footprint.
+
+## Features
+
+-   **Stackless Coroutines:** Tasks do not have their own stacks, saving precious RAM.
+-   **Cooperative Scheduling:** Tasks yield control explicitly, allowing for predictable execution.
+-   **Compile-Time Task Definition:** Tasks are defined at compile-time, allowing for optimized memory layout and type-safe task management.
+-   **Simple API:** A minimal set of functions for task control.
+
+## How to use with `ch32_zig` library
+
+This guide explains how to add `zico` as a dependency to your own Zig project, specifically when using the `ch32_zig` HAL library (from `https://github.com/ghostiam/ch32_zig`).
+
+### 1. Add `zico` and `ch32` to your `build.zig.zon`
+
+First, you need to add `zico` and `ch32` to your project's dependencies in the `build.zig.zon` file.
+
+```zig
+.{
+    .name = "my-awesome-project",
+    .version = "0.0.1",
+    .dependencies = .{
+        .zico = .{
+            // Replace with the path or URL to your zico library.
+            // For local development, use a path relative to your project root.
+            .path = "../zico", // Example for local development
+            // or for a remote dependency:
+            // .url = "https://github.com/svenyurgensson/zico/archive/refs/heads/main.zip",
+            // .hash = "123456789...", // Replace with correct hash after zig fetch
+        },
+        .ch32 = .{
+            .url = "https://github.com/ghostiam/ch32_zig/archive/refs/heads/master.zip",
+            // Replace with the correct hash after fetching
+            .hash = "ch32_zig-0.0.0-KNlt8xf_mgDXNfaFumvgABLp5MuEFkSPMJT4sOI0xGRZ", 
+        },
+    },
+    .minimum_zig_version = "0.15.2",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
+```
+
+After adding this, run `zig build` in your project's root to fetch remote dependencies and get the correct `.hash` values.
+
+### 2. Configure `build.zig`
+
+Next, configure your `build.zig` to make `zico` and `ch32` (especially its `hal` module) available to your firmware executable.
+
+```zig
+const std = @import("std");
+const ch32 = @import("ch32"); // Import the ch32 build system utilities
+
+pub fn build(b: *std.Build) void {
+    // Get the ch32 dependency information
+    const ch32_dep = b.dependency("ch32", .{});
+    // Get the zico dependency information
+    const zico_dep = b.dependency("zico", .{});
+
+    // Define your target microcontroller (e.g., CH32V003)
+    const target_chip = .{ .series = .ch32v003 };
+    const target = ch32.zigTarget(target_chip);
+    const optimize = b.standardOptimizeOption(.{});
+
+    // Create the zico module from its source files
+    const zico_module = b.createModule(.{
+        .root_source_file = zico_dep.path("src/zico.zig"),
+        .imports = &.{
+            .{ .name = "task", .source_file = zico_dep.path("src/task.zig") },
+        },
+    });
+
+    // Get the HAL module from the ch32 dependency
+    const hal_module = ch32_dep.module("hal");
+
+    // Create your firmware executable
+    const exe = b.addExecutable(.{
+        .name = "my-firmware",
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Set the linker script provided by the ch32 library
+    exe.setLinkerScript(ch32.linkerScript(b, target_chip));
+    
+    // Add the zico and hal modules to your executable
+    exe.addModule("zico", zico_module);
+    exe.addModule("hal", hal_module); // Make hal module available
+
+    // Install the executable
+    b.installArtifact(exe);
+
+    // Optional: Add flashing, size reporting, etc. using ch32 utilities
+    ch32.installFirmware(b, exe, .{}); // for .bin
+    ch32.installFirmware(b, exe, .{ .format = .elf }); // for .elf
+    ch32.printFirmwareSize(b, exe); // Print size information
+
+    // Add a run step for convenience (e.g., `zig build run`)
+    const run_step = b.step("run", "Run firmware (e.g., flash)");
+    run_step.dependOn(&ch32.addMinichlink(b, ch32_dep, exe).step);
+}
+```
+
+### 3. Usage in Your Code (`src/main.zig`)
+
+Now you can import and use `zico` and `hal` in your `src/main.zig`.
+
+```zig
+const std = @import("std");
+const hal = @import("hal"); // Import the HAL module provided by ch32_zig
+const zico = @import("zico"); // Import the zico scheduler library
+
+// 1. Define your task functions
+fn my_task_1() void {
+    while (true) {
+        // Do something...
+        scheduler.delay(100); // Wait for 100ms
+    }
+}
+
+fn my_task_2() void {
+    while (true) {
+        // Do something else...
+        scheduler.yield(); // Yield to other tasks
+    }
+}
+
+// 2. Create a compile-time array of task definitions
+const AppTaskDefs = [_]zico.TaskDef{
+    .{ .name = "task1", .func = &my_task_1 },
+    .{ .name = "task2", .func = &my_task_2 },
+};
+
+// 3. Generate the Scheduler type and create a public instance
+// NOTE: This `scheduler` variable must be accessible by your tasks.
+// Keeping it `pub` in your main.zig is the simplest way.
+pub const Scheduler = zico.Zico(&AppTaskDefs);
+pub var scheduler: Scheduler = undefined;
+
+// 4. Define your interrupt vector table using ch32_zig's HAL
+pub const interrupts: hal.interrupts.VectorTable = .{
+    .SysTick = hal.time.sysTickHandler,
+    .SW = Scheduler.SoftwareInterruptHandler, // Use zico's software interrupt handler
+};
+
+// 5. Initialize and run the scheduler in main
+pub fn main() !void {
+    // Hardware initialization using ch32_zig HAL
+    const clock = hal.clock.setOrGet(.hsi_max);
+    hal.time.init(clock);
+
+    // Initialize the scheduler
+    scheduler = Scheduler.init();
+
+    // Enable interrupts globally
+    hal.interrupts.globalEnable();
+
+    // Run the scheduler (this call never returns)
+    scheduler.runLoop();
+}
+```
+
+## Public API
+
+The scheduler instance provides several methods for task control. These are typically called on a global `scheduler` variable defined in your `main.zig`.
+
+### `scheduler.yield()`
+
+Voluntarily yields control to the scheduler, allowing other tasks to run. The current task is placed back in the ready queue and will run again on a future scheduling cycle.
+
+```zig
+fn my_task() void {
+    while (true) {
+        // Do some work...
+        log.info("Task part 1", .{});
+        
+        // Give other tasks a chance to run
+        scheduler.yield();
+        
+        // Continue work...
+        log.info("Task part 2", .{});
+        scheduler.yield();
+    }
+}
+```
+
+### `scheduler.delay(milliseconds: u16)`
+
+Pauses the current task for a specified duration in milliseconds. The task will be moved to a waiting state and will not be scheduled again until the timer expires.
+
+```zig
+fn led_blinker_task() void {
+    const led = // ... initialize GPIO pin
+    while (true) {
+        led.toggle();
+        // Wait for 500ms before toggling again
+        scheduler.delay(500);
+    }
+}
+```
+
+### `scheduler.suspendTask(task_id: TaskID)`
+
+Suspends a different task, specified by its `TaskID`. The suspended task will not be scheduled until it is resumed by another task. The `TaskID` is an enum generated at compile-time from the names provided in `AppTaskDefs`.
+
+```zig
+const AppTaskDefs = [_]zico.TaskDef{
+    .{ .name = "blinker", .func = &blinker_task },
+    .{ .name = "controller", .func = &controller_task },
+};
+
+// ... in controller_task ...
+// Stop the blinker task
+scheduler.suspendTask(.blinker);
+```
+
+### `scheduler.resumeTask(task_id: TaskID)`
+
+Resumes a previously suspended task, making it ready to run again.
+
+```zig
+// ... in controller_task ...
+// Restart the blinker task
+scheduler.resumeTask(.blinker);
+```
+
+### `scheduler.suspendSelf()`
+
+Suspends the currently running task. This is useful for tasks that should only run once or need to be explicitly woken up by another part of the system.
+
+```zig
+fn setup_task() void {
+    // Perform one-time setup
+    setup_i2c();
+    setup_spi();
+
+    // This task is done, suspend it forever.
+    scheduler.suspendSelf();
+}
+```
+
+## Synchronization with Semaphores
+
+`zico` provides a basic counting semaphore for synchronizing tasks or controlling access to shared resources.
+
+### `zico.Semaphore.init(initial_count: u8) Semaphore`
+
+Initializes a new semaphore with a given initial count.
+
+### `semaphore.wait()`
+
+Decrements the semaphore's count. If the count is already zero, the calling task will block and be moved to a waiting state until another task signals the semaphore.
+
+### `semaphore.signal()`
+
+Increments the semaphore's count. If any tasks are waiting on the semaphore, one of them will be unblocked and moved to the ready state.
+
+### Example: Producer-Consumer
+
+Here's how to use a semaphore to manage a shared resource between a producer and a consumer task.
+
+```zig
+const std = @import("std");
+const zico = @import("zico");
+const hal = @import("hal");
+
+// A shared resource, e.g., a single-item buffer
+var shared_buffer: ?u8 = null;
+
+// A semaphore to signal when the buffer is full
+var buffer_full_sem = zico.Semaphore.init(0);
+// A semaphore to signal when the buffer is empty
+var buffer_empty_sem = zico.Semaphore.init(1);
+
+// Producer task: writes data to the buffer
+fn producer_task() void {
+    var data: u8 = 0;
+    while (true) {
+        // Wait until the buffer is empty
+        buffer_empty_sem.wait();
+
+        // Write to the shared resource
+        shared_buffer = data;
+        std.log.info("Produced: {}", .{data});
+        data += 1;
+
+        // Signal that the buffer is now full
+        buffer_full_sem.signal();
+    }
+}
+
+// Consumer task: reads data from the buffer
+fn consumer_task() void {
+    while (true) {
+        // Wait until the buffer is full
+        buffer_full_sem.wait();
+
+        // Read from the shared resource
+        const data = shared_buffer orelse @panic("Buffer should not be null!");
+        shared_buffer = null;
+        std.log.info("Consumed: {}", .{data});
+
+        // Signal that the buffer is now empty
+        buffer_empty_sem.signal();
+
+        // Add a small delay to make the output readable
+        scheduler.delay(1000);
+    }
+}
+
+const AppTaskDefs = [_]zico.TaskDef{
+    .{ .name = "producer", .func = &producer_task },
+    .{ .name = "consumer", .func = &consumer_task },
+};
+
+// ... main function and scheduler setup ...
+```
+
+
+<!-- LICENSE -->
+## License
+
+Distributed under the MIT License. See `LICENSE.txt` for more information.
+
+
+
+<!-- CONTACT -->
+## Contact
+
+Yury Batenko - jurbat@gmail.com
+
+Project Link: [https://github.com/svenyurgensson/zico](https://github.com/svenyurgensson/zico)
