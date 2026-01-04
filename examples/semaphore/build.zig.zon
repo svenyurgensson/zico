@@ -1,0 +1,19 @@
+.{
+    .name = "semaphore",
+    .version = "0.0.1",
+    .dependencies = .{
+        .ch32 = .{
+            .url = "https://github.com/ghostiam/ch32_zig/archive/refs/heads/master.zip",
+            .hash = "ch32_zig-0.0.0-KNlt8xf_mgDXNfaFumvgABLp5MuEFkSPMJT4sOI0xGRZ",
+        },
+        .zico = .{
+            .path = "../..",
+        },
+    },
+    .minimum_zig_version = "0.15.2",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

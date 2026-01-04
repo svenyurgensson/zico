@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const ch32_dep = b.dependency("ch32", .{});
     const zico_dep = b.dependency("zico", .{});
 
-    const name = "blinky";
+    const name = "semaphore";
     const targets: []const ch32.Target = &.{
         .{ .chip = .{ .series = .ch32v003 } },
     };
