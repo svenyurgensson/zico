@@ -13,7 +13,7 @@ It provides a simple, cooperative multitasking environment with minimal memory f
 
 ## How to use with `ch32_zig` library
 
-This guide explains how to add `zico` as a dependency to your own Zig project, specifically when using the `ch32_zig` HAL library (from `https://github.com/ghostiam/ch32_zig`).
+This guide explains how to add `zico` as a dependency to your own Zig project, specifically when using the [ch32_zig](https://github.com/ghostiam/ch32_zig) HAL library.
 
 ### 1. Add `zico` and `ch32` to your `build.zig.zon`
 
