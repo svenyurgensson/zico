@@ -4,7 +4,7 @@ const zico = @import("./zico.zig");
 const MAX_WAITING_TASKS = 8;
 
 const WaitQueue = struct {
-    tasks: [MAX_WAITING_TASKS]u8,
+    tasks: [MAX_WAITING_TASKS]u8 = undefined,
     head: u4 = 0,
     tail: u4 = 0,
     count: u4 = 0,
@@ -50,7 +50,7 @@ pub fn Channel(comptime T: type, comptime size: usize) type {
                 asm volatile ("li a0, %[ecall_type]\nmv a1, %[wait_obj]\necall"
                     : // No output
                     : [ecall_type] "i" (@intFromEnum(zico.EcallType.channel_send)),
-                      [wait_obj] "r" (self)
+                      [wait_obj] "r" (self),
                     : zico.ClobbersYield);
             }
 
@@ -74,7 +74,7 @@ pub fn Channel(comptime T: type, comptime size: usize) type {
                 asm volatile ("li a0, %[ecall_type]\nmv a1, %[wait_obj]\necall"
                     : // No output
                     : [ecall_type] "i" (@intFromEnum(zico.EcallType.channel_receive)),
-                      [wait_obj] "r" (self)
+                      [wait_obj] "r" (self),
                     : zico.ClobbersYield);
             }
 
