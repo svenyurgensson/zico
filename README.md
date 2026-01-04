@@ -73,6 +73,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = zico_dep.path("src/zico.zig"),
         .imports = &.{
             .{ .name = "task", .source_file = zico_dep.path("src/task.zig") },
+            .{ .name = "message", .source_file = zico_dep.path("src/message.zig") },
         },
     });
 
