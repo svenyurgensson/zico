@@ -48,8 +48,8 @@ fn receiver_task() void {
 
 // 4. Define the tasks for the scheduler
 const AppTaskDefs = [_]zico.TaskDef{
-    .{ .name = "sender", .func = &sender_task },
-    .{ .name = "receiver", .func = &receiver_task },
+    .{ .name = "sender", .func = &sender_task, .stack_size = 4 * 16 },
+    .{ .name = "receiver", .func = &receiver_task, .stack_size = 4 * 16 },
 };
 
 // 5. Standard zico and HAL setup

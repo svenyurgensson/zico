@@ -5,3 +5,5 @@ tmp/
 docs/
 GEMINI.md
 mise.toml
+*.ss
+*.pdf

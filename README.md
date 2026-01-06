@@ -1,12 +1,12 @@
-# zico - A Stackless Coroutine Scheduler for RISC-V
+# zico - Coroutine Scheduler for RISC-V
 
-`zico` is a lightweight, stackless coroutine (task) scheduler designed for resource-constrained microcontrollers, specifically targeting the CH32V003 RISC-V MCU. It is designed to be used in conjunction with the `ch32_zig` Hardware Abstraction Layer (HAL) library.
+`zico` is a lightweight, stackful coroutine (task) scheduler designed for resource-constrained microcontrollers, specifically targeting the CH32V003 RISC-V MCU. It is designed to be used in conjunction with the `ch32_zig` Hardware Abstraction Layer (HAL) library.
 
 It provides a simple, cooperative multitasking environment with minimal memory footprint.
 
 ## Features
 
--   **Stackless Coroutines:** Tasks do not have their own stacks, saving precious RAM.
+-   **Stackfull Coroutines:** Tasks have their own stacks, but use minimum RAM for that.
 -   **Cooperative Scheduling:** Tasks yield control explicitly, allowing for predictable execution.
 -   **Compile-Time Task Definition:** Tasks are defined at compile-time, allowing for optimized memory layout and type-safe task management.
 -   **Simple API:** A minimal set of functions for task control.
@@ -72,8 +72,8 @@ pub fn build(b: *std.Build) void {
     const zico_module = b.createModule(.{
         .root_source_file = zico_dep.path("src/zico.zig"),
         .imports = &.{
-            .{ .name = "task", .source_file = zico_dep.path("src/task.zig") },
-            .{ .name = "message", .source_file = zico_dep.path("src/message.zig") },
+            .{ .name = "task", .source_file = zico_dep.path("src/task.zig"), .stack_size = 4 * 16  },
+            .{ .name = "message", .source_file = zico_dep.path("src/message.zig"), .stack_size = 4 * 16  },
         },
     });
 
@@ -135,8 +135,8 @@ fn my_task_2() void {
 
 // 2. Create a compile-time array of task definitions
 const AppTaskDefs = [_]zico.TaskDef{
-    .{ .name = "task1", .func = &my_task_1 },
-    .{ .name = "task2", .func = &my_task_2 },
+    .{ .name = "task1", .func = &my_task_1, .stack_size = 4 * 16  },
+    .{ .name = "task2", .func = &my_task_2, .stack_size = 4 * 16  },
 };
 
 // 3. Generate the Scheduler type and create a public instance
@@ -213,8 +213,8 @@ Suspends a different task, specified by its `TaskID`. The suspended task will no
 
 ```zig
 const AppTaskDefs = [_]zico.TaskDef{
-    .{ .name = "blinker", .func = &blinker_task },
-    .{ .name = "controller", .func = &controller_task },
+    .{ .name = "blinker", .func = &blinker_task, .stack_size = 4 * 16  },
+    .{ .name = "controller", .func = &controller_task, .stack_size = 4 * 16  },
 };
 
 // ... in controller_task ...
@@ -317,8 +317,8 @@ fn consumer_task() void {
 }
 
 const AppTaskDefs = [_]zico.TaskDef{
-    .{ .name = "producer", .func = &producer_task },
-    .{ .name = "consumer", .func = &consumer_task },
+    .{ .name = "producer", .func = &producer_task, .stack_size = 4 * 16  },
+    .{ .name = "consumer", .func = &consumer_task, .stack_size = 4 * 16  },
 };
 
 // ... main function and scheduler setup ...
@@ -382,22 +382,136 @@ fn receiver_task() void {
 }
 
 const AppTaskDefs = [_]zico.TaskDef{
-    .{ .name = "sender", .func = &sender_task },
-    .{ .name = "receiver", .func = &receiver_task },
+    .{ .name = "sender", .func = &sender_task, .stack_size = 4 * 16  },
+    .{ .name = "receiver", .func = &receiver_task, .stack_size = 4 * 16  },
 };
 
 // ... main function and scheduler setup ...
 ```
 
+<!-- ... existing content ... -->
+
+
+
+## Examples
+
+
+
+The `zico` library comes with several examples demonstrating its features. To build and flash them to your CH32V003 microcontroller, navigate to the respective example directory and use `zig build`.
+
+
+
+Make sure you have `minichlink` or another compatible programmer for CH32V003 set up and connected.
+
+
+
+### Blinky Example
+
+
+
+A basic example demonstrating task creation and `scheduler.delay()` to blink an LED.
+
+
+
+```bash
+
+cd examples/blinky
+
+zig build
+
+# To flash: zig build minichlink
+
+# To build for release: zig build -Doptimize=ReleaseSmall
+
+# To build for debug: zig build -Doptimize=Debug
+
+```
+
+
+
+### Semaphore Example
+
+
+
+Demonstrates inter-task synchronization using `zico.Semaphore` with a producer-consumer pattern.
+
+
+
+```bash
+
+cd examples/semaphore
+
+zig build
+
+# To flash: zig build minichlink
+
+# To build for release: zig build -Doptimize=ReleaseSmall
+
+# To build for debug: zig build -Doptimize=Debug
+
+```
+
+
+
+### Message Channel Example
+
+
+
+Illustrates inter-task communication using `zico.Channel` for message passing.
+
+
+
+```bash
+
+cd examples/message
+
+zig build
+
+# To flash: zig build minichlink
+
+# To build for release: zig build -Doptimize=ReleaseSmall
+
+# To build for debug: zig build -Doptimize=Debug
+
+```
+
+
+
+### Channel Example
+
+
+
+Another example demonstrating inter-task communication using `zico.Channel` for message passing.
+
+
+
+```bash
+
+cd examples/channel
+
+zig build
+
+# To flash: zig build minichlink
+
+# To build for release: zig build -Doptimize=ReleaseSmall
+
+# To build for debug: zig build -Doptimize=Debug
+
+```
+
+
+
 <!-- LICENSE -->
+
 ## License
+
+
 
 Distributed under the MIT License. See [LICENSE.txt](./LICENSE.txt) for more information.
 
 
 
-<!-- CONTACT -->
-## Contact
+<!-- ... existing content ... -->
 
 Yury Batenko - jurbat@gmail.com
 

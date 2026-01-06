@@ -3,66 +3,55 @@ const ch32 = @import("ch32");
 
 pub fn build(b: *std.Build) void {
     const ch32_dep = b.dependency("ch32", .{});
+    const zico_dep = b.dependency("zico", .{});
 
     const name = "message";
     const targets: []const ch32.Target = &.{
         .{ .chip = .{ .series = .ch32v003 } },
     };
 
-    //      ┌──────────────────────────────────────────────────────────┐
-    //      │                          Build                           │
-    //      └──────────────────────────────────────────────────────────┘
     const optimize = b.option(
         std.builtin.OptimizeMode,
         "optimize",
         "Prioritize performance, safety, or binary size",
     ) orelse .ReleaseSmall;
 
-    // Load the dependencies
+    // --- Create Modules from Dependencies ---
+    const hal_module = ch32_dep.module("hal");
+
+    // Create the zico module from its Zig source files
+    const zico_module = b.createModule(.{
+        .root_source_file = zico_dep.path("src/zico.zig"),
+        .imports = &.{
+            .{ .name = "task", .path = zico_dep.path("src/task.zig") },
+            .{ .name = "message", .path = zico_dep.path("src/message.zig") },
+        },
+    });
 
     for (targets) |target| {
-        const zico_dep = b.dependency("zico", .{
-            .target = b.resolveTargetQuery(target.chip.target()),
-            .optimize = optimize,
-        });
-        const zico_module = zico_dep.module("zico");
-
-        const fw = ch32.addFirmware(b, ch32_dep, .{
-            .name = b.fmt("{s}_{s}", .{ name, target.chip.string() }),
+        const exe = b.addExecutable(.{
+            .name = name,
             .root_source_file = b.path("src/main.zig"),
-            .target = target,
+            .target = ch32.zigTarget(target),
             .optimize = optimize,
         });
-        // Get modules from fw
-        const app_mod = fw.root_module.import_table.get("app").?;
-        const hal_mod = fw.root_module.import_table.get("hal").?;
-        const svd_mod = fw.root_module.import_table.get("svd").?;
+        exe.setLinkerScript(ch32.linkerScript(b, target));
 
-        // Make zico knows that modules
-        zico_module.addImport("hal", hal_mod);
-        zico_module.addImport("svd", svd_mod);
-        zico_module.addImport("ch32", fw.root_module);
+        exe.addModule("hal", hal_module);
+        exe.addModule("zico", zico_module);
 
-        app_mod.addImport("zico", zico_module);
-
-        // Emit the bin file for flashing.
-        const fw_bin = ch32.installFirmware(b, fw, .{});
+        // --- Installation and Flashing ---
+        const fw_bin = ch32.installFirmware(b, exe, .{});
         ch32.printFirmwareSize(b, fw_bin);
-
-        // Emit the elf file for debugging.
-        _ = ch32.installFirmware(b, fw, .{ .format = .elf });
+        _ = ch32.installFirmware(b, exe, .{ .format = .elf });
+        _ = ch32.installFirmware(b, exe, .{ .format = .@"asm" });
     }
 
-    //      ┌──────────────────────────────────────────────────────────┐
-    //      │                          Clean                           │
-    //      └──────────────────────────────────────────────────────────┘
+    // --- Standard Steps ---
     const clean_step = b.step("clean", "Clean up");
     clean_step.dependOn(&b.addRemoveDirTree(.{ .cwd_relative = b.install_path }).step);
     clean_step.dependOn(&b.addRemoveDirTree(.{ .cwd_relative = b.pathFromRoot(".zig-cache") }).step);
 
-    //      ┌──────────────────────────────────────────────────────────┐
-    //      │                        minichlink                        │
-    //      └──────────────────────────────────────────────────────────┘
     const minichlink_step = b.step("minichlink", "minichlink");
     ch32.addMinichlink(b, ch32_dep, minichlink_step);
 }

@@ -50,8 +50,8 @@ fn consumer_task() void {
 }
 
 const AppTaskDefs = [_]zico.TaskDef{
-    .{ .name = "producer", .func = &producer_task },
-    .{ .name = "consumer", .func = &consumer_task },
+    .{ .name = "producer", .func = &producer_task, .stack_size = 4 * 16 },
+    .{ .name = "consumer", .func = &consumer_task, .stack_size = 4 * 16 },
 };
 
 pub const Scheduler = zico.Zico(&AppTaskDefs);

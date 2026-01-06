@@ -3,13 +3,15 @@ const hal = @import("hal");
 const zico = @import("zico");
 
 // --- Определение задач ---
+const led = hal.Pin.init(.GPIOC, 13);
+
 fn led_task() void {
-    const led = hal.Pin.init(.GPIOC, 13);
     led.enablePort();
     led.asOutput(.{ .speed = .max_50mhz, .mode = .push_pull });
 
     while (true) {
         scheduler.yield();
+
         led.toggle();
         scheduler.delay(500);
         scheduler.suspendTask(.debug);
@@ -24,10 +26,10 @@ fn debug_task() void {
     }
 }
 
-// Создаем comptime-массив с определениями задач
+// Создаем comptime-массив с определениями задач и стеком для каждой (в байтах)
 const AppTaskDefs = [_]zico.TaskDef{
-    .{ .name = "led", .func = &led_task },
-    .{ .name = "debug", .func = &debug_task },
+    .{ .name = "led", .func = &led_task, .stack_size = 4 * 16 },
+    .{ .name = "debug", .func = &debug_task, .stack_size = 4 * 3 },
 };
 
 // Генерируем тип планировщика

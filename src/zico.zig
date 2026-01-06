@@ -3,146 +3,132 @@ const hal = @import("hal");
 const svd = @import("svd");
 const PFIC = svd.peripherals.PFIC;
 const task = @import("./task.zig");
-const message = @import("./message.zig");
+const sync = @import("./sync.zig");
+const syscall = @import("./syscall.zig");
 
-pub const Channel = message.Channel;
+pub const Channel = sync.Channel;
+pub const Semaphore = sync.Semaphore;
 pub const TaskDef = task.TaskDef;
 
-var zico_instance: ?*anyopaque = null;
-var schedule_fn: ?*const fn () void = null;
+var schedule_fn: ?*const fn () callconv(.naked) void = null;
 
-pub const ClobbersYield = .{
-    .memory = true,
-    .x1 = true,
-    .x2 = true,
-    .x3 = true,
-    .x4 = true,
-    .x5 = true,
-    .x6 = true,
-    .x7 = true,
-    .x8 = true,
-    .x9 = true,
-    .x10 = true,
-    .x11 = true,
-    .x12 = true,
-    .x13 = true,
-    .x14 = true,
-    .x15 = true,
-};
-pub const ClobbersArgs = .{
-    .memory = true,
-    .x2 = true,
-    .x3 = true,
-    .x4 = true,
-    .x5 = true,
-    .x6 = true,
-    .x7 = true,
-    .x8 = true,
-    .x9 = true,
-    .x10 = true,
-    .x11 = true,
-    .x12 = true,
-    .x13 = true,
-    .x14 = true,
-    .x15 = true,
-};
+pub inline fn getZicoInstance() *anyopaque {
+    var zico_ptr: *anyopaque = undefined;
+    asm ("mv %[ptr], tp"
+        : [ptr] "=r" (zico_ptr),
+        :
+        : .{});
+    return zico_ptr;
+}
 
 fn idleTask() void {
     while (true) {
-        asm volatile ("li a0, %[yield_type]\necall"
-            :
-            : [yield_type] "i" (@intFromEnum(EcallType.yield)),
-            : ClobbersYield);
+        syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.yield);
+        asm volatile ("ecall" ::: syscall.ClobbersForEcall);
     }
 }
 
-pub const EcallType = enum(u8) {
-    yield = 0,
-    delay = 1,
-    suspend_self = 2,
-    sem_wait = 3,
-    sem_signal = 4,
-    channel_send = 5,
-    channel_receive = 6,
-};
-
-pub const TaskState = enum(u4) {
-    idle = 0,
-    ready = 2,
-    suspended = 3,
-    waiting_on_timer = 4,
-    waiting_on_semaphore = 5,
-    waiting_on_channel_send = 7,
-    waiting_on_channel_receive = 8,
-};
-
-pub const TaskFlags = struct {
-    state: TaskState,
-    has_message: bool,
-    priority: u3,
-};
-
-pub const TSS = struct {
-    next_addr: u32,
-    flags: TaskFlags,
-    wait_obj: ?*anyopaque,
-    delay_timer: u16,
-
-    pub fn init(entry_point: u32) TSS {
-        return .{
-            .next_addr = entry_point,
-            .flags = .{ .state = .idle, .has_message = false, .priority = 0 },
-            .wait_obj = null,
-            .delay_timer = 0,
-        };
-    }
-
-    pub inline fn getState(self: *const TSS) TaskState {
-        return self.flags.state;
-    }
-    pub inline fn setState(self: *TSS, new_state: TaskState) void {
-        self.flags.state = new_state;
-    }
-    pub inline fn getDelayTimer(self: *const TSS) u16 {
-        return self.delay_timer;
-    }
-    pub inline fn setDelayTimer(self: *TSS, timer: u16) void {
-        self.delay_timer = timer;
-    }
-};
-
 const ZicoHeader = struct {
-    tasks: []TSS,
+    tasks: []task.TSS,
+    tasks_count: u8,
+    current_task: u8,
+    last_timer_update_ms: u32,
+    next_stack_addr: usize,
 };
 
-/// Wakes a task by its ID, setting its state to ready.
-/// This is intended for use by synchronization primitives.
 pub fn wakeTask(task_id: u8) void {
-    // Safely get a pointer to the active scheduler instance.
-    const zico_ptr = zico_instance orelse return;
-    // Cast the opaque pointer to a pointer to our known header structure.
-    // This is safe because `tasks` is the first field in the `Zico` struct.
+    const zico_ptr = getZicoInstance();
     const scheduler: *ZicoHeader = @ptrCast(@alignCast(zico_ptr));
-
-    if (task_id < scheduler.tasks.len) {
+    if (task_id < scheduler.tasks_count) {
         scheduler.tasks[task_id].setState(.ready);
     }
+}
+
+export fn zico_scheduler_logic(self_ptr: *anyopaque, current_sp: u32) *const task.TSS {
+    const self: *ZicoHeader = @ptrCast(@alignCast(self_ptr));
+
+    const outgoing_task_tss = &self.tasks[self.current_task];
+    outgoing_task_tss.sp = current_sp;
+
+    outgoing_task_tss.next_addr = hal.cpu.csr.mepc.read() + 4;
+
+    const ecall_type_raw = syscall.ecall_args_ptr.a0;
+    const ecall_type: syscall.EcallType = @enumFromInt(@as(u8, @truncate(ecall_type_raw)));
+
+    switch (ecall_type) {
+        .yield => self.tasks[self.current_task].setState(.ready),
+        .delay => {
+            const ecall_arg = syscall.ecall_args_ptr.a1;
+            self.tasks[self.current_task].setState(.waiting_on_timer);
+            self.tasks[self.current_task].setDelayTimer(@truncate(ecall_arg));
+        },
+        .suspend_self => self.tasks[self.current_task].setState(.suspended),
+        else => {
+            self.tasks[self.current_task].setState(.ready);
+        },
+    }
+
+    const current_ms = hal.time.millis();
+    if (current_ms > self.last_timer_update_ms) {
+        const elapsed_ms = @as(u16, @intCast(current_ms - self.last_timer_update_ms));
+        for (self.tasks) |*task_item| {
+            if (task_item.getState() == .waiting_on_timer) {
+                if (task_item.getDelayTimer() > elapsed_ms) {
+                    task_item.setDelayTimer(task_item.getDelayTimer() - elapsed_ms);
+                } else {
+                    task_item.setState(.ready);
+                    task_item.setDelayTimer(0);
+                }
+            }
+        }
+        self.last_timer_update_ms = current_ms;
+    }
+
+    var next_task_idx: usize = self.current_task;
+    var i: usize = 0;
+    const tasks_len = self.tasks_count;
+    while (i < tasks_len) : (i += 1) {
+        next_task_idx = (next_task_idx + 1) % tasks_len;
+        if (self.tasks[next_task_idx].getState() == .ready) break;
+    }
+
+    if (self.tasks[next_task_idx].getState() != .ready) {
+        next_task_idx = 0;
+    }
+    self.current_task = @as(u8, @intCast(next_task_idx));
+
+    return &self.tasks[self.current_task];
 }
 
 pub fn Zico(comptime task_defs: []const task.TaskDef) type {
     return struct {
         const Self = @This();
 
-        tasks: []TSS,
+        tasks: []task.TSS,
         tasks_count: u8 = 0,
         current_task: u8 = 0,
         last_timer_update_ms: u32 = 0,
+        next_stack_addr: usize = 0,
 
         pub const TaskUnion = task.CreateTaskUnion(task_defs);
         pub const TaskID = @typeInfo(TaskUnion).@"union".tag_type.?;
 
-        const TASK_COUNT = 1 + task_defs.len;
-        var tasks_storage: [TASK_COUNT]TSS = undefined;
+        const MINIMAL_CONTEXT_STACK_SIZE: usize = 64;
+
+        const TOTAL_STACK_SIZE = blk: {
+            var total: usize = 0;
+            total += MINIMAL_CONTEXT_STACK_SIZE + 128; // idle task
+            for (task_defs) |def| {
+                if (def.stack_size % 4 != 0) {
+                    @compileError("Task '" ++ def.name ++ "' stack_size must be a multiple of 4.");
+                }
+                total += MINIMAL_CONTEXT_STACK_SIZE + def.stack_size;
+            }
+            break :blk total;
+        };
+
+        var tasks_storage: [1 + task_defs.len]task.TSS = undefined;
+        var stacks_storage: [TOTAL_STACK_SIZE]u8 align(8) = undefined;
 
         pub const SoftwareInterruptHandler = @as(hal.interrupts.Handler, @ptrCast(&switchTaskISR));
 
@@ -152,39 +138,33 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
                 .tasks_count = 0,
                 .current_task = 0,
                 .last_timer_update_ms = 0,
+                .next_stack_addr = @intFromPtr(&stacks_storage),
             };
-            zico_instance = &self;
-            schedule_fn = &scheduleNextTask_trampoline;
+            schedule_fn = &scheduleNextTask;
             self.last_timer_update_ms = hal.time.millis();
-            _ = self.addTask(&idleTask) catch @panic("Failed to add idle task");
+            _ = self.addTask(&idleTask, 128) catch @panic("Failed to add idle task");
             self.tasks[0].setState(.ready);
             inline for (task_defs) |task_def| {
-                const task_id = self.addTask(task_def.func) catch @panic("Failed to add user task");
+                const task_id = self.addTask(task_def.func, task_def.stack_size) catch @panic("Failed to add user task");
                 self.tasks[task_id].setState(.ready);
             }
             return self;
         }
 
         pub inline fn yield(_: *Self) void {
-            asm volatile ("li a0, %[yield_type]\necall"
-                :
-                : [yield_type] "i" (@intFromEnum(EcallType.yield)),
-                : ClobbersYield);
+            syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.yield);
+            asm volatile ("ecall");
         }
 
         pub inline fn suspendSelf(_: *Self) void {
-            asm volatile ("li a0, %[suspend_type]\necall"
-                :
-                : [suspend_type] "i" (@intFromEnum(EcallType.suspend_self)),
-                : ClobbersYield);
+            syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.suspend_self);
+            asm volatile ("ecall");
         }
 
         pub inline fn delay(_: *Self, N: u16) void {
-            asm volatile ("li a0, %[delay_type]\nmv a1, %[delay_val]\necall"
-                :
-                : [delay_type] "i" (@intFromEnum(EcallType.delay)),
-                  [delay_val] "r" (N),
-                : ClobbersArgs);
+            syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.delay);
+            syscall.ecall_args_ptr.a1 = N;
+            asm volatile ("ecall");
         }
 
         pub fn suspendTask(self: *Self, task_id: Self.TaskID) void {
@@ -206,167 +186,73 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
             self.current_task = 0;
             const current_task_ref = &self.tasks[self.current_task];
             hal.cpu.csr.mepc.write(current_task_ref.next_addr);
-            asm volatile ("mret");
+            asm volatile (
+                \\ mv tp, %[zico_ptr]
+                \\ mv sp, %[sp]
+                \\ mret
+                :
+                : [zico_ptr] "r" (self),
+                  [sp] "r" (current_task_ref.sp),
+                : .{ .x4 = true });
             unreachable;
         }
 
-        fn addTask(self: *Self, task_fn_ptr: *const fn () void) !u8 {
+        fn addTask(self: *Self, task_fn_ptr: *const fn () void, stack_size: usize) !u8 {
             const task_id = self.tasks_count;
             if (task_id >= self.tasks.len) return error.NoMoreTaskSlots;
+
+            const stack_total_size = MINIMAL_CONTEXT_STACK_SIZE + stack_size;
+            const stack_bottom_addr: usize = self.next_stack_addr;
+            const stack_top_addr: usize = stack_bottom_addr + stack_total_size;
+            self.next_stack_addr += stack_total_size;
+
+            const initial_sp: u32 = @intCast(stack_top_addr - 48);
+
+            const hpe_frame_ptr: [*]u8 = @ptrFromInt(initial_sp);
+            @memset(hpe_frame_ptr[0..48], 0);
+
+            const x1_addr = initial_sp + 44;
+            const x1_ptr: *volatile u32 = @ptrFromInt(x1_addr);
+            x1_ptr.* = @intFromPtr(task_fn_ptr);
+
             const entry_addr = @intFromPtr(task_fn_ptr);
-            self.tasks[task_id] = TSS.init(@as(u32, @truncate(entry_addr)));
+            self.tasks[task_id] = task.TSS.init(@as(u32, @truncate(entry_addr)), initial_sp);
             self.tasks_count += 1;
             return task_id;
-        }
-
-        fn scheduleNextTask_internal(self: *Self) void {
-            var ecall_type_raw: u32 = undefined;
-            var ecall_arg: u32 = undefined;
-            asm volatile (""
-                : [t] "= {a0}" (ecall_type_raw),
-                  [a] "= {a1}" (ecall_arg),
-            );
-            const ecall_type: EcallType = @enumFromInt(@as(u8, @truncate(ecall_type_raw)));
-
-            const current_mepc = hal.cpu.csr.mepc.read();
-            self.tasks[self.current_task].next_addr = current_mepc;
-
-            var should_switch: bool = true;
-
-            switch (ecall_type) {
-                .yield => self.tasks[self.current_task].setState(.ready),
-                .delay => {
-                    const current_task_ref = &self.tasks[self.current_task];
-                    current_task_ref.setState(.waiting_on_timer);
-                    current_task_ref.setDelayTimer(@truncate(ecall_arg));
-                },
-                .suspend_self => self.tasks[self.current_task].setState(.suspended),
-                .sem_wait => {
-                    const current_task_ref = &self.tasks[self.current_task];
-                    current_task_ref.setState(.waiting_on_semaphore);
-                    current_task_ref.wait_obj = @ptrFromInt(ecall_arg);
-                },
-                .sem_signal => {
-                    const sem_ptr: *anyopaque = @ptrFromInt(ecall_arg);
-                    for (self.tasks) |*t| {
-                        if (t.getState() == .waiting_on_semaphore and t.wait_obj == sem_ptr) {
-                            t.setState(.ready);
-                            t.wait_obj = null;
-                            break;
-                        }
-                    }
-                    should_switch = false;
-                },
-                .channel_send => {
-                    const current_task_ref = &self.tasks[self.current_task];
-                    const header_ptr: *message.ChannelHeader = @ptrFromInt(ecall_arg);
-                    
-                    header_ptr.send_wait_queue.enqueue(self.current_task) catch |err| {
-                        std.log.err("failed to enqueue sender: {}", .{err});
-                    };
-
-                    current_task_ref.setState(.waiting_on_channel_send);
-                    current_task_ref.wait_obj = header_ptr;
-                },
-                .channel_receive => {
-                    const current_task_ref = &self.tasks[self.current_task];
-                    const header_ptr: *message.ChannelHeader = @ptrFromInt(ecall_arg);
-
-                    header_ptr.recv_wait_queue.enqueue(self.current_task) catch |err| {
-                        std.log.err("failed to enqueue receiver: {}", .{err});
-                    };
-
-                    current_task_ref.setState(.waiting_on_channel_receive);
-                    current_task_ref.wait_obj = header_ptr;
-                },
-            }
-
-            if (!should_switch) {
-                hal.cpu.csr.mepc.write(current_mepc);
-                PFIC.STK_CTLR.modify(.{ .SWIE = 0 });
-                return;
-            }
-
-            const current_ms = hal.time.millis();
-            if (current_ms > self.last_timer_update_ms) {
-                const elapsed_ms = @as(u16, @intCast(current_ms - self.last_timer_update_ms));
-                for (self.tasks) |*task_item| {
-                    if (task_item.getState() == .waiting_on_timer) {
-                        if (task_item.getDelayTimer() > elapsed_ms) {
-                            task_item.setDelayTimer(task_item.getDelayTimer() - elapsed_ms);
-                        } else {
-                            task_item.setState(.ready);
-                            task_item.setDelayTimer(0);
-                        }
-                    }
-                }
-                self.last_timer_update_ms = current_ms;
-            }
-
-            var next_task_idx: usize = self.current_task;
-            var i: usize = 0;
-            const tasks_len = self.tasks_count;
-            while (i < tasks_len) : (i += 1) {
-                next_task_idx = (next_task_idx + 1) % tasks_len;
-                if (self.tasks[next_task_idx].getState() == .ready) break;
-            }
-
-            if (self.tasks[next_task_idx].getState() != .ready) {
-                next_task_idx = 0;
-            }
-            self.current_task = @as(u8, @intCast(next_task_idx));
-
-            const next_mepc_addr = self.tasks[self.current_task].next_addr;
-            hal.cpu.csr.mepc.write(next_mepc_addr);
-            PFIC.STK_CTLR.modify(.{ .SWIE = 0 });
-        }
-
-        fn scheduleNextTask_trampoline() void {
-            const zico_unwrapped: *anyopaque = zico_instance orelse return;
-            const zico: *Self = @ptrCast(@alignCast(zico_unwrapped));
-            zico.scheduleNextTask_internal();
         }
     };
 }
 
-pub const Semaphore = struct {
-    count: u8,
-
-    pub fn init(initial_count: u8) Semaphore {
-        return .{ .count = initial_count };
-    }
-
-    pub fn wait(self: *Semaphore) void {
-        if (self.count > 0) {
-            self.count -= 1;
-        } else {
-            asm volatile ("li a0, %[sem_wait_type]\nmv a1, %[sem_ptr]\necall"
-                :
-                : [sem_wait_type] "i" (@intFromEnum(EcallType.sem_wait)),
-                  [sem_ptr] "r" (self),
-                : ClobbersArgs);
-        }
-    }
-
-    pub fn signal(self: *Semaphore) void {
-        self.count += 1;
-        asm volatile ("li a0, %[sem_signal_type]\nmv a1, %[sem_ptr]\necall"
-            :
-            : [sem_signal_type] "i" (@intFromEnum(EcallType.sem_signal)),
-              [sem_ptr] "r" (self),
-            : ClobbersArgs);
-    }
-};
-
 pub fn switchTaskISR() callconv(.naked) void {
-    asm volatile ("jal ra, %[scheduler]\n" ++ "mret"
-        :
-        : [scheduler] "i" (scheduleNextTask),
-        : .{ .memory = true });
+    asm volatile ("j scheduleNextTask" ::: .{});
 }
 
-export fn scheduleNextTask() void {
-    if (schedule_fn) |f| {
-        f();
-    }
+export fn scheduleNextTask() callconv(.naked) void {
+    asm volatile (
+    // We are on the interrupted task's stack.
+    // Save the original/interrupted SP in a callee-saved register (s1) so it survives.
+        \\ mv s1, sp
+        // Now, allocate our own small frame on the current stack to save ra.
+        \\ addi sp, sp, -4
+        \\ sw ra, 0(sp)
+        // Load zico_instance pointer from tp into a0
+        \\ mv a0, tp 
+        // Pass current_sp in a1 (second argument)
+        \\ mv a1, s1
+        // Call the global scheduler logic function. It will return a pointer to the next TSS in `a0`.
+        \\ jal ra, %[logic]
+        // After return, a0 holds the pointer to the next TSS.
+        // Restore this function's temporary frame before switching stacks.
+        \\ lw ra, 0(sp)
+        \\ addi sp, sp, 4
+        // Now, perform the final context switch.
+        // Restore sp and mepc from the new TSS.
+        \\ lw sp, 0(a0)      // tss.sp
+        \\ lw a1, 4(a0)      // tss.next_addr
+        \\ csrw mepc, a1
+        // Return from exception. This will trigger HPE to restore registers and jump to mepc.
+        \\ mret
+        :
+        : [logic] "i" (zico_scheduler_logic),
+        : .{ .memory = true, .x1 = true, .x2 = true, .x8 = true, .x9 = true, .x10 = true, .x11 = true });
 }

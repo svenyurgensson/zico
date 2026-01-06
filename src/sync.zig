@@ -1,5 +1,6 @@
 const std = @import("std");
 const zico = @import("./zico.zig");
+const syscall = @import("./syscall.zig");
 
 const MAX_WAITING_TASKS = 8;
 
@@ -53,11 +54,9 @@ pub fn Channel(comptime T: type, comptime size: usize) type {
 
         pub fn send(self: *Self, message: T) !void {
             if (self.header.count >= size) {
-                asm volatile ("li a0, %[ecall_type]\nmv a1, %[wait_obj]\necall"
-                    :
-                    : [ecall_type] "i" (@intFromEnum(zico.EcallType.channel_send)),
-                      [wait_obj] "r" (&self.header) // Pass pointer to the header
-                    : zico.ClobbersArgs);
+                zico.ecall_args_ptr.a0 = @intFromEnum(zico.EcallType.channel_send);
+                zico.ecall_args_ptr.a1 = @intFromPtr(&self.header);
+                asm volatile ("ecall" ::: zico.ClobbersForEcall);
                 return self.send(message);
             }
 
@@ -72,11 +71,9 @@ pub fn Channel(comptime T: type, comptime size: usize) type {
 
         pub fn receive(self: *Self) !T {
             if (self.header.count == 0) {
-                asm volatile ("li a0, %[ecall_type]\nmv a1, %[wait_obj]\necall"
-                    :
-                    : [ecall_type] "i" (@intFromEnum(zico.EcallType.channel_receive)),
-                      [wait_obj] "r" (&self.header) // Pass pointer to the header
-                    : zico.ClobbersArgs);
+                zico.ecall_args_ptr.a0 = @intFromEnum(zico.EcallType.channel_receive);
+                zico.ecall_args_ptr.a1 = @intFromPtr(&self.header);
+                asm volatile ("ecall" ::: zico.ClobbersForEcall);
                 return self.receive();
             }
 
@@ -92,3 +89,25 @@ pub fn Channel(comptime T: type, comptime size: usize) type {
         }
     };
 }
+
+pub const Semaphore = struct {
+    count: u8,
+    pub fn init(initial_count: u8) Semaphore {
+        return .{ .count = initial_count };
+    }
+    pub fn wait(self: *Semaphore) void {
+        if (self.count > 0) {
+            self.count -= 1;
+        } else {
+            syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.sem_wait);
+            syscall.ecall_args_ptr.a1 = @intFromPtr(self);
+            asm volatile ("ecall");
+        }
+    }
+    pub fn signal(self: *Semaphore) void {
+        self.count += 1;
+        syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.sem_signal);
+        syscall.ecall_args_ptr.a1 = @intFromPtr(self);
+        asm volatile ("ecall");
+    }
+};

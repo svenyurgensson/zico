@@ -4,7 +4,7 @@ const ch32 = @import("ch32");
 pub fn build(b: *std.Build) void {
     const ch32_dep = b.dependency("ch32", .{});
 
-    const name = "blinky";
+    const name = "channel";
     const targets: []const ch32.Target = &.{
         .{ .chip = .{ .series = .ch32v003 } },
     };
@@ -50,11 +50,7 @@ pub fn build(b: *std.Build) void {
         ch32.printFirmwareSize(b, fw_bin);
 
         // Emit the elf file for debugging.
-        const fw_elf = ch32.installFirmware(b, fw, .{ .format = .elf });
-
-        const run_objdump = b.addSystemCommand(&.{ "riscv-none-elf-size", "-G" });
-        run_objdump.addFileArg(fw_elf);
-        b.getInstallStep().dependOn(&run_objdump.step);
+        _ = ch32.installFirmware(b, fw, .{ .format = .elf });
     }
 
     //      ┌──────────────────────────────────────────────────────────┐
