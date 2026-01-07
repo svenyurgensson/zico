@@ -11,4 +11,10 @@
         },
     },
     .minimum_zig_version = "0.15.2",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+    .fingerprint = 0xa2f98e472fc186a4,
 }

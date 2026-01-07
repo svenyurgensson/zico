@@ -21,9 +21,12 @@ pub inline fn getZicoInstance() *anyopaque {
     return zico_ptr;
 }
 
+// This is the idle task. It runs when no other tasks are ready to run.
+// It simply yields control back to the scheduler immediately, preventing the CPU from
+// wasting cycles and ensuring the scheduler always has something to execute.
 fn idleTask() void {
     while (true) {
-        syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.yield);
+        syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.yield); // set yield() operation code
         asm volatile ("ecall" ::: syscall.ClobbersForEcall);
     }
 }
@@ -114,6 +117,7 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
         pub const TaskID = @typeInfo(TaskUnion).@"union".tag_type.?;
 
         const MINIMAL_CONTEXT_STACK_SIZE: usize = 64;
+        const SCHEDULER_STACK_SIZE: usize = 64;
 
         const TOTAL_STACK_SIZE = blk: {
             var total: usize = 0;
@@ -129,6 +133,7 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
 
         var tasks_storage: [1 + task_defs.len]task.TSS = undefined;
         var stacks_storage: [TOTAL_STACK_SIZE]u8 align(8) = undefined;
+        var scheduler_stack: [SCHEDULER_STACK_SIZE]u8 align(8) = undefined;
 
         pub const SoftwareInterruptHandler = @as(hal.interrupts.Handler, @ptrCast(&switchTaskISR));
 
@@ -140,6 +145,14 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
                 .last_timer_update_ms = 0,
                 .next_stack_addr = @intFromPtr(&stacks_storage),
             };
+
+            const scheduler_stack_top = @intFromPtr(&scheduler_stack) + SCHEDULER_STACK_SIZE;
+            asm volatile (
+                \\ csrw mscratch, %[stack_top]
+                :
+                : [stack_top] "r" (scheduler_stack_top)
+            );
+
             schedule_fn = &scheduleNextTask;
             self.last_timer_update_ms = hal.time.millis();
             _ = self.addTask(&idleTask, 128) catch @panic("Failed to add idle task");
@@ -153,18 +166,18 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
 
         pub inline fn yield(_: *Self) void {
             syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.yield);
-            asm volatile ("ecall");
+            asm volatile ("ecall" ::: syscall.ClobbersForEcall);
         }
 
         pub inline fn suspendSelf(_: *Self) void {
             syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.suspend_self);
-            asm volatile ("ecall");
+            asm volatile ("ecall" ::: syscall.ClobbersForEcall);
         }
 
         pub inline fn delay(_: *Self, N: u16) void {
             syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.delay);
             syscall.ecall_args_ptr.a1 = N;
-            asm volatile ("ecall");
+            asm volatile ("ecall" ::: syscall.ClobbersForEcall);
         }
 
         pub fn suspendTask(self: *Self, task_id: Self.TaskID) void {
@@ -179,6 +192,13 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
             if (idx < self.tasks_count) {
                 self.tasks[idx].setState(.ready);
             }
+        }
+
+        pub fn getTaskState(self: *const Self, comptime task_id: Self.TaskID) task.TaskState {
+            const idx = @intFromEnum(task_id) + 1;
+            // The comptime task_id guarantees that the index is valid,
+            // so a runtime bounds check is not necessary.
+            return self.tasks[idx].getState();
         }
 
         pub fn runLoop(self: *Self) noreturn {
@@ -229,30 +249,40 @@ pub fn switchTaskISR() callconv(.naked) void {
 
 export fn scheduleNextTask() callconv(.naked) void {
     asm volatile (
-    // We are on the interrupted task's stack.
-    // Save the original/interrupted SP in a callee-saved register (s1) so it survives.
-        \\ mv s1, sp
-        // Now, allocate our own small frame on the current stack to save ra.
+        // We are on the interrupted task's stack.
+        // 1. Atomically swap to the scheduler stack.
+        //    The task's SP is saved into mscratch, and sp is loaded with the scheduler's stack pointer.
+        \\ csrrw sp, mscratch, sp
+        \\ 
+        // We are now on the scheduler's private stack.
+        // 2. Save ra since we are about to make a call.
         \\ addi sp, sp, -4
         \\ sw ra, 0(sp)
-        // Load zico_instance pointer from tp into a0
+        \\ 
+        // 3. Prepare arguments for zico_scheduler_logic(self_ptr: *anyopaque, current_sp: u32)
+        //    - arg0 (a0): self_ptr, which is already in the 'tp' register.
+        //    - arg1 (a1): The interrupted task's SP, which is now in 'mscratch'.
         \\ mv a0, tp 
-        // Pass current_sp in a1 (second argument)
-        \\ mv a1, s1
-        // Call the global scheduler logic function. It will return a pointer to the next TSS in `a0`.
+        \\ csrr a1, mscratch
+        \\ 
+        // 4. Call the C ABI scheduler logic function.
         \\ jal ra, %[logic]
+        \\ 
         // After return, a0 holds the pointer to the next TSS.
-        // Restore this function's temporary frame before switching stacks.
+        // 5. Restore our stack frame.
         \\ lw ra, 0(sp)
         \\ addi sp, sp, 4
-        // Now, perform the final context switch.
-        // Restore sp and mepc from the new TSS.
+        \\ 
+        // 6. Perform the final context switch for the new task.
+        //    Restore sp and mepc from the new TSS.
         \\ lw sp, 0(a0)      // tss.sp
         \\ lw a1, 4(a0)      // tss.next_addr
         \\ csrw mepc, a1
-        // Return from exception. This will trigger HPE to restore registers and jump to mepc.
+        \\ 
+        // 7. Return from exception. This will restore the new task's context
+        //    and correctly handle the interrupt-enable state.
         \\ mret
         :
         : [logic] "i" (zico_scheduler_logic),
-        : .{ .memory = true, .x1 = true, .x2 = true, .x8 = true, .x9 = true, .x10 = true, .x11 = true });
+        : .{ .memory = true, .x1 = true, .x2 = true, .x5 = true, .x6 = true, .x10 = true, .x11 = true });
 }

@@ -1,9 +1,11 @@
 xpacks/
 .zig-cache/
+.vscode/
 zig-out/
 tmp/
 docs/
 GEMINI.md
 mise.toml
-*.ss
+*.s
 *.pdf
+*.gdb

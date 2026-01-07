@@ -50,7 +50,11 @@ pub fn build(b: *std.Build) void {
         ch32.printFirmwareSize(b, fw_bin);
 
         // Emit the elf file for debugging.
-        _ = ch32.installFirmware(b, fw, .{ .format = .elf });
+        const fw_elf = ch32.installFirmware(b, fw, .{ .format = .elf });
+
+        const run_objdump = b.addSystemCommand(&.{ "riscv-none-elf-size", "-G" });
+        run_objdump.addFileArg(fw_elf);
+        b.getInstallStep().dependOn(&run_objdump.step);
     }
 
     //      ┌──────────────────────────────────────────────────────────┐

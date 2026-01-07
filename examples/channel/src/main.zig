@@ -9,9 +9,7 @@ var data_channel = zico.Channel(u8, 4).init();
 fn sender_task() void {
     var count: u8 = 0;
     while (true) {
-        data_channel.send(count) catch |err| {
-            std.log.err("Sender error: {}", .{err});
-        };
+        data_channel.send(count);
         std.log.info("Sent: {}", .{count});
         count += 1;
         scheduler.delay(300); // Send every 300ms
@@ -21,10 +19,7 @@ fn sender_task() void {
 // Receiver task
 fn receiver_task() void {
     while (true) {
-        const received_value = data_channel.receive() catch |err| {
-            std.log.err("Receiver error: {}", .{err});
-            continue;
-        };
+        const received_value = data_channel.receive();
         std.log.warn("Received: {}", .{received_value});
         scheduler.delay(1000); // Process every 1000ms
     }
@@ -47,7 +42,6 @@ pub const interrupts: hal.interrupts.VectorTable = .{
 pub fn main() !void {
     const clock = hal.clock.setOrGet(.hsi_max);
     hal.time.init(clock);
-    hal.debug.init(clock); // Initialize debug logging
 
     scheduler = Scheduler.init();
 

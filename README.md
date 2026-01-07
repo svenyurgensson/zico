@@ -232,6 +232,16 @@ Resumes a previously suspended task, making it ready to run again.
 scheduler.resumeTask(.blinker);
 ```
 
+### `scheduler.getTaskState(comptime task_id: TaskID) TaskState`
+
+Returns the current state of a task specified by its `task_id`. The `task_id` must be known at compile time (e.g., `.my_task`). Providing an invalid `task_id` will result in a compile-time error. This method is useful for monitoring or debugging task execution.
+
+```zig
+// Get the state of the "blinker" task
+const blinker_state = scheduler.getTaskState(.blinker);
+std.log.info("Blinker task state: {}", .{blinker_state});
+```
+
 ### `scheduler.suspendSelf()`
 
 Suspends the currently running task. This is useful for tasks that should only run once or need to be explicitly woken up by another part of the system.
@@ -360,9 +370,7 @@ var data_channel = zico.Channel(u8, 4).init();
 fn sender_task() void {
     var count: u8 = 0;
     while (true) {
-        data_channel.send(count) catch |err| {
-            std.log.err("Sender error: {}", .{err});
-        };
+        data_channel.send(count);
         std.log.info("Sent: {}", .{count});
         count += 1;
         scheduler.delay(300); // Send every 300ms
@@ -372,10 +380,7 @@ fn sender_task() void {
 // Receiver task
 fn receiver_task() void {
     while (true) {
-        const received_value = data_channel.receive() catch |err| {
-            std.log.err("Receiver error: {}", .{err});
-            continue;
-        };
+        const received_value = data_channel.receive();
         std.log.warn("Received: {}", .{received_value});
         scheduler.delay(1000); // Process every 1000ms
     }
@@ -389,7 +394,101 @@ const AppTaskDefs = [_]zico.TaskDef{
 // ... main function and scheduler setup ...
 ```
 
-<!-- ... existing content ... -->
+
+
+
+
+
+
+When writing tasks for the `zico` scheduler, it is crucial to adhere to several important rules and conventions to ensure system stability.
+
+
+
+
+
+
+
+### 1. Stack Size (`stack_size`)
+
+
+
+
+
+
+
+In the `zico.TaskDef` task definition, the `stack_size` field is of type `u8`.
+
+
+
+*   This imposes a **compile-time limit of 255 bytes** for the user-defined portion of the task's stack.
+
+
+
+*   Attempting to specify a value greater than 255 will result in a **compilation error**.
+
+
+
+*   **Important:** The system automatically adds an additional 64 bytes (`MINIMAL_CONTEXT_STACK_SIZE`) to your specified size for the scheduler's own context. Thus, the actual allocated stack size will be `stack_size + 64` bytes.
+
+
+
+
+
+
+
+### 2. Reserved Registers
+
+
+
+
+
+
+
+For the scheduler to operate correctly, certain processor registers are reserved for its internal use. Modifying these registers within your user task code will lead to an immediate system crash.
+
+
+
+
+
+
+
+#### `tp` (Thread Pointer) Register
+
+
+
+*   **STATUS: DO NOT USE.**
+
+
+
+*   This register is used to store a pointer to the scheduler instance. The `ecall` handler uses it to access the scheduler's state.
+
+
+
+
+
+
+
+#### `mscratch` Register
+
+
+
+*   **STATUS: DO NOT USE.**
+
+
+
+*   This register is used during context switching to temporarily store stack pointers, facilitating a safe switch to the dedicated scheduler stack.
+
+
+
+
+
+
+
+**Never modify the `tp` and `mscratch` registers in your application code.**
+
+
+
+
 
 
 
@@ -397,7 +496,11 @@ const AppTaskDefs = [_]zico.TaskDef{
 
 
 
+
+
 The `zico` library comes with several examples demonstrating its features. To build and flash them to your CH32V003 microcontroller, navigate to the respective example directory and use `zig build`.
+
+
 
 
 

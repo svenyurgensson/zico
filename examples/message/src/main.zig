@@ -13,11 +13,7 @@ fn sender_task() void {
     while (true) {
         // Send the counter value through the channel.
         // This will block if the channel buffer is full.
-        channel.send(counter) catch |err| {
-            std.log.err("Failed to send: {any}", .{err});
-            scheduler.delay(1000);
-            continue;
-        };
+        channel.send(counter);
 
         std.log.info("Sent: {}", .{counter});
         counter += 1;
@@ -32,11 +28,7 @@ fn receiver_task() void {
     while (true) {
         // Receive a message from the channel.
         // This will block if the channel is empty.
-        const received_msg = channel.receive() catch |err| {
-            std.log.err("Failed to receive: {any}", .{err});
-            scheduler.delay(1000);
-            continue;
-        };
+        const received_msg = channel.receive();
 
         std.log.warn("Received: {}", .{received_msg});
 

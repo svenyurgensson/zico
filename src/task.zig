@@ -8,7 +8,7 @@ pub const TaskDef = struct {
     /// A pointer to the task's function. Must be `fn() void`.
     func: TaskDefT,
     /// Additional stack size required by the task, in bytes.
-    stack_size: usize,
+    stack_size: u8,
 };
 
 /// A comptime function that creates a tagged union of task function pointers
