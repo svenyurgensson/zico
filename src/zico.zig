@@ -127,6 +127,7 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
 
         const MINIMAL_CONTEXT_STACK_SIZE: usize = 64;
         const SCHEDULER_STACK_SIZE: usize = 64;
+        const IDLE_TASK_STACK_SIZE: usize = 64;
 
         const TOTAL_STACK_SIZE = blk: {
             var total: usize = 0;
@@ -164,11 +165,9 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
 
             schedule_fn = &scheduleNextTask;
             self.last_timer_update_ms = hal.time.millis();
-            _ = self.addTask(&idleTask, 128) catch @panic("Failed to add idle task");
-            self.tasks[0].setState(.ready);
+            _ = self.addTask(&idleTask, IDLE_TASK_STACK_SIZE) catch @panic("Failed to add idle task");
             inline for (task_defs) |task_def| {
-                const task_id = self.addTask(task_def.func, task_def.stack_size) catch @panic("Failed to add user task");
-                self.tasks[task_id].setState(.ready);
+                _ = self.addTask(task_def.func, task_def.stack_size) catch @panic("Failed to add user task");
             }
             return self;
         }
@@ -246,6 +245,7 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
 
             const entry_addr = @intFromPtr(task_fn_ptr);
             self.tasks[task_id] = task.TSS.init(@as(u32, @truncate(entry_addr)), initial_sp);
+            self.tasks[task_id].setState(.ready);
             self.tasks_count += 1;
             return task_id;
         }

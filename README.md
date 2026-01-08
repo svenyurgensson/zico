@@ -239,7 +239,20 @@ Returns the current state of a task specified by its `task_id`. The `task_id` mu
 ```zig
 // Get the state of the "blinker" task
 const blinker_state = scheduler.getTaskState(.blinker);
-std.log.info("Blinker task state: {}", .{blinker_state});
+switch (blinker_state) {
+    .ready => {
+        std.log.info("Blinker is ready to run!", .{});
+    },
+    .suspended => {
+        std.log.info("Blinker is currently suspended.", .{});
+    },
+    .waiting_on_timer => {
+        std.log.info("Blinker is delaying.", .{});
+    },
+    else => {
+        std.log.info("Blinker is in state: {}", .{blinker_state});
+    },
+}
 ```
 
 ### `scheduler.suspendSelf()`
