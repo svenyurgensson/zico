@@ -139,7 +139,7 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
 
         const MINIMAL_CONTEXT_STACK_SIZE: usize = 64;
         const SCHEDULER_STACK_SIZE: usize = 64;
-        const IDLE_TASK_STACK_SIZE: usize = 64;
+        const IDLE_TASK_STACK_SIZE: usize = 24;
 
         const TOTAL_STACK_SIZE = blk: {
             var total: usize = 0;
