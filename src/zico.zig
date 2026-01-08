@@ -72,8 +72,15 @@ export fn zico_scheduler_logic(self_ptr: *anyopaque, current_sp: u32) *const tas
     }
 
     const current_ms = hal.time.millis();
-    if (current_ms > self.last_timer_update_ms) {
-        const elapsed_ms = @as(u16, @intCast(current_ms - self.last_timer_update_ms));
+    // Use wrapping subtraction to correctly handle timer overflow.
+    const elapsed_ms_u32 = current_ms -% self.last_timer_update_ms;
+
+    // Only update timers if time has actually passed.
+    if (elapsed_ms_u32 > 0) {
+        // The elapsed time should not be enormously large. We can safely truncate to u16
+        // as we don't expect the scheduler to be blocked for more than 65 seconds.
+        const elapsed_ms = @as(u16, @truncate(elapsed_ms_u32));
+
         for (self.tasks) |*task_item| {
             if (task_item.getState() == .waiting_on_timer) {
                 if (task_item.getDelayTimer() > elapsed_ms) {
@@ -84,6 +91,8 @@ export fn zico_scheduler_logic(self_ptr: *anyopaque, current_sp: u32) *const tas
                 }
             }
         }
+        // IMPORTANT: Update last_timer_update_ms using the current time, NOT by adding elapsed time.
+        // This prevents drift.
         self.last_timer_update_ms = current_ms;
     }
 
@@ -150,7 +159,7 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
             asm volatile (
                 \\ csrw mscratch, %[stack_top]
                 :
-                : [stack_top] "r" (scheduler_stack_top)
+                : [stack_top] "r" (scheduler_stack_top),
             );
 
             schedule_fn = &scheduleNextTask;
@@ -180,18 +189,18 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
             asm volatile ("ecall" ::: syscall.ClobbersForEcall);
         }
 
-        pub fn suspendTask(self: *Self, task_id: Self.TaskID) void {
+        pub fn suspendTask(self: *Self, comptime task_id: Self.TaskID) void {
             const idx = @intFromEnum(task_id) + 1;
-            if (idx < self.tasks_count) {
-                self.tasks[idx].setState(.suspended);
-            }
+            // The comptime task_id guarantees that the index is valid,
+            // so a runtime bounds check is not necessary.
+            self.tasks[idx].setState(.suspended);
         }
 
-        pub fn resumeTask(self: *Self, task_id: Self.TaskID) void {
+        pub fn resumeTask(self: *Self, comptime task_id: Self.TaskID) void {
             const idx = @intFromEnum(task_id) + 1;
-            if (idx < self.tasks_count) {
-                self.tasks[idx].setState(.ready);
-            }
+            // The comptime task_id guarantees that the index is valid,
+            // so a runtime bounds check is not necessary.
+            self.tasks[idx].setState(.ready);
         }
 
         pub fn getTaskState(self: *const Self, comptime task_id: Self.TaskID) task.TaskState {
@@ -249,9 +258,9 @@ pub fn switchTaskISR() callconv(.naked) void {
 
 export fn scheduleNextTask() callconv(.naked) void {
     asm volatile (
-        // We are on the interrupted task's stack.
-        // 1. Atomically swap to the scheduler stack.
-        //    The task's SP is saved into mscratch, and sp is loaded with the scheduler's stack pointer.
+    // We are on the interrupted task's stack.
+    // 1. Atomically swap to the scheduler stack.
+    //    The task's SP is saved into mscratch, and sp is loaded with the scheduler's stack pointer.
         \\ csrrw sp, mscratch, sp
         \\ 
         // We are now on the scheduler's private stack.

@@ -398,123 +398,54 @@ const AppTaskDefs = [_]zico.TaskDef{
 
 
 
-
+## Important information!
 
 When writing tasks for the `zico` scheduler, it is crucial to adhere to several important rules and conventions to ensure system stability.
 
 
-
-
-
-
-
 ### 1. Stack Size (`stack_size`)
-
-
-
-
-
-
 
 In the `zico.TaskDef` task definition, the `stack_size` field is of type `u8`.
 
-
-
 *   This imposes a **compile-time limit of 255 bytes** for the user-defined portion of the task's stack.
-
-
-
 *   Attempting to specify a value greater than 255 will result in a **compilation error**.
-
-
-
 *   **Important:** The system automatically adds an additional 64 bytes (`MINIMAL_CONTEXT_STACK_SIZE`) to your specified size for the scheduler's own context. Thus, the actual allocated stack size will be `stack_size + 64` bytes.
-
-
-
-
-
 
 
 ### 2. Reserved Registers
 
 
-
-
-
-
-
 For the scheduler to operate correctly, certain processor registers are reserved for its internal use. Modifying these registers within your user task code will lead to an immediate system crash.
-
-
-
-
-
-
 
 #### `tp` (Thread Pointer) Register
 
-
-
 *   **STATUS: DO NOT USE.**
-
-
-
 *   This register is used to store a pointer to the scheduler instance. The `ecall` handler uses it to access the scheduler's state.
-
-
-
-
-
 
 
 #### `mscratch` Register
 
-
-
 *   **STATUS: DO NOT USE.**
-
-
-
 *   This register is used during context switching to temporarily store stack pointers, facilitating a safe switch to the dedicated scheduler stack.
-
-
-
-
-
 
 
 **Never modify the `tp` and `mscratch` registers in your application code.**
 
+### 3. Timer Granularity
 
-
-
-
+The `scheduler.delay()` function operates with a granularity of **1 millisecond (ms)**. This precision is determined by the underlying `hal.time.millis()` function, which is typically incremented by a SysTick interrupt at a 1ms interval.
+Therefore, any delays you specify will be rounded to the nearest millisecond, and the shortest possible delay is 1ms.
 
 
 ## Examples
 
-
-
-
-
 The `zico` library comes with several examples demonstrating its features. To build and flash them to your CH32V003 microcontroller, navigate to the respective example directory and use `zig build`.
-
-
-
-
 
 Make sure you have `minichlink` or another compatible programmer for CH32V003 set up and connected.
 
-
-
 ### Blinky Example
 
-
-
 A basic example demonstrating task creation and `scheduler.delay()` to blink an LED.
-
-
 
 ```bash
 
