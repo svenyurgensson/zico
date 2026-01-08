@@ -79,6 +79,7 @@ pub fn Channel(comptime T: type, comptime size: usize) type {
 
         pub fn send(self: *Self, message: T) void {
             if (self.header.count >= size) {
+                syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.channel_send);
                 syscall.ecall_args_ptr.a1 = @intFromPtr(&self.header.send_wait_queue);
                 asm volatile ("ecall" ::: syscall.ClobbersForEcall);
                 return self.send(message);
@@ -151,3 +152,52 @@ pub const Semaphore = struct {
         }
     }
 };
+
+test "WaitQueue functionality" {
+    var queue = WaitQueue{};
+
+    // Test 1: Enqueue and Dequeue basic operation
+    try std.testing.expect(queue.dequeue() == null); // Empty queue
+
+    try queue.enqueue(10);
+    try queue.enqueue(20);
+    try std.testing.expect(queue.count == 2);
+    try std.testing.expect(queue.head == 0);
+    try std.testing.expect(queue.tail == 2);
+
+    try std.testing.expect(queue.dequeue().? == 10);
+    try std.testing.expect(queue.dequeue().? == 20);
+    try std.testing.expect(queue.dequeue() == null); // Should be empty again
+    try std.testing.expect(queue.count == 0);
+    try std.testing.expect(queue.head == 2);
+    try std.testing.expect(queue.tail == 2);
+
+    // Test 2: Queue full
+    var i: u8 = 0;
+    while (i < MAX_WAITING_TASKS) : (i += 1) {
+        try queue.enqueue(i);
+    }
+    try std.testing.expect(queue.count == MAX_WAITING_TASKS);
+    try std.testing.expectError(error.QueueFull, queue.enqueue(MAX_WAITING_TASKS)); // Should fail to enqueue more
+
+    // Test 3: Wrap-around behavior
+    for (0..MAX_WAITING_TASKS / 2) |_| {
+        _ = queue.dequeue(); // Dequeue half the elements
+    }
+    try std.testing.expect(queue.count == MAX_WAITING_TASKS / 2);
+
+    try queue.enqueue(100); // Enqueue some more
+    try queue.enqueue(101);
+    try std.testing.expect(queue.count == MAX_WAITING_TASKS / 2 + 2);
+
+    // Continue dequeuing and checking order
+    try std.testing.expect(queue.dequeue().? == MAX_WAITING_TASKS / 2);
+    try std.testing.expect(queue.dequeue().? == MAX_WAITING_TASKS / 2 + 1);
+    
+    // Dequeue remaining
+    while (queue.dequeue()) |task_id| {
+        _ = task_id;
+    }
+    try std.testing.expect(queue.count == 0);
+    try std.testing.expect(queue.head == queue.tail); // Head and tail should meet
+}
