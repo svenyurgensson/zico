@@ -66,8 +66,20 @@ export fn zico_scheduler_logic(self_ptr: *anyopaque, current_sp: u32) *const tas
             self.tasks[self.current_task].setDelayTimer(@truncate(ecall_arg));
         },
         .suspend_self => self.tasks[self.current_task].setState(.suspended),
-        else => {
-            self.tasks[self.current_task].setState(.ready);
+        .sem_wait => {
+            const sem: *sync.Semaphore = @ptrFromInt(syscall.ecall_args_ptr.a1);
+            sem.wait_queue.enqueue(self.current_task) catch @panic("Semaphore wait queue full!");
+            self.tasks[self.current_task].setState(.waiting_on_semaphore);
+        },
+        .channel_send => {
+            const queue: *sync.WaitQueue = @ptrFromInt(syscall.ecall_args_ptr.a1);
+            queue.enqueue(self.current_task) catch @panic("Channel send wait queue full!");
+            self.tasks[self.current_task].setState(.waiting_on_channel_send);
+        },
+        .channel_receive => {
+            const queue: *sync.WaitQueue = @ptrFromInt(syscall.ecall_args_ptr.a1);
+            queue.enqueue(self.current_task) catch @panic("Channel receive wait queue full!");
+            self.tasks[self.current_task].setState(.waiting_on_channel_receive);
         },
     }
 
