@@ -3,12 +3,9 @@ const hal = @import("hal");
 const zico = @import("zico");
 
 // --- Определение задач ---
-const led = hal.Pin.init(.GPIOC, 13);
+const led = hal.Pin.init(.GPIOD, 4);
 
 fn led_task() void {
-    led.enablePort();
-    led.asOutput(.{ .speed = .max_50mhz, .mode = .push_pull });
-
     while (true) {
         scheduler.yield();
 
@@ -43,17 +40,24 @@ pub const interrupts: hal.interrupts.VectorTable = .{
     .SW = Scheduler.SoftwareInterruptHandler,
 };
 
-pub fn main() !void {
-    // 1. Инициализация железа
+pub fn main() void {
+    // WORKAROUND: The default _start code sets mtvec to 3, which provides no base address for exceptions like `ecall`.
+    // We set mtvec to `0x190 | 3` to set the exception base to our handler (`zico.switchTaskISR` at 0x190)
+    // while keeping fast interrupt mode (3) enabled for PFIC-handled interrupts like SysTick.
+    asm volatile (
+        \\ li a5, 0x193
+        \\ csrw mtvec, a5
+        ::: .{ .x10 = true });
+
     const clock = hal.clock.setOrGet(.hsi_max);
     hal.time.init(clock);
 
-    // 3. Инициализация планировщика
+    led.enablePort();
+    led.asOutput(.{ .speed = .max_50mhz, .mode = .push_pull });
+
     scheduler = Scheduler.init();
 
-    // 4. Включаем прерывания глобально
     hal.interrupts.globalEnable();
 
-    // 5. Запускаем планировщик. Эта функция не возвращает управление.
     scheduler.runLoop();
 }

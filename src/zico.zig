@@ -222,17 +222,22 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
         }
 
         pub fn runLoop(self: *Self) noreturn {
+            asm volatile (
+                \\ mv tp, %[zico_ptr]
+                :
+                : [zico_ptr] "r" (self),
+                : .{});
             if (self.tasks_count == 0) @panic("Cannot run scheduler with no tasks");
             self.current_task = 0;
             const current_task_ref = &self.tasks[self.current_task];
-            hal.cpu.csr.mepc.write(current_task_ref.next_addr);
+            const next_pc = current_task_ref.next_addr;
+            const next_sp = current_task_ref.sp;
+            hal.cpu.csr.mepc.write(next_pc);
             asm volatile (
-                \\ mv tp, %[zico_ptr]
                 \\ mv sp, %[sp]
                 \\ mret
                 :
-                : [zico_ptr] "r" (self),
-                  [sp] "r" (current_task_ref.sp),
+                : [sp] "r" (next_sp),
                 : .{ .x4 = true });
             unreachable;
         }
@@ -241,23 +246,22 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
             const task_id = self.tasks_count;
             if (task_id >= self.tasks.len) return error.NoMoreTaskSlots;
 
-            const stack_total_size = MINIMAL_CONTEXT_STACK_SIZE + stack_size;
-            const stack_bottom_addr: usize = self.next_stack_addr;
-            const stack_top_addr: usize = stack_bottom_addr + stack_total_size;
-            self.next_stack_addr += stack_total_size;
+            const current_task = &self.tasks[task_id];
 
-            const initial_sp: u32 = @intCast(stack_top_addr - 48);
+            const total_task_stack_size = stack_size + MINIMAL_CONTEXT_STACK_SIZE;
 
-            const hpe_frame_ptr: [*]u8 = @ptrFromInt(initial_sp);
-            @memset(hpe_frame_ptr[0..48], 0);
+            // The stack pointer should point to the top of the allocated block,
+            // as the stack grows downwards.
+            const initial_sp: u32 = @intCast(self.next_stack_addr + total_task_stack_size);
 
-            const x1_addr = initial_sp + 44;
-            const x1_ptr: *volatile u32 = @ptrFromInt(x1_addr);
-            x1_ptr.* = @intFromPtr(task_fn_ptr);
+            // Set the SP and PC for the new task.
+            current_task.sp = initial_sp;
+            current_task.next_addr = @intFromPtr(task_fn_ptr);
+            current_task.setState(.ready);
 
-            const entry_addr = @intFromPtr(task_fn_ptr);
-            self.tasks[task_id] = task.TSS.init(@as(u32, @truncate(entry_addr)), initial_sp);
-            self.tasks[task_id].setState(.ready);
+            // Shift the pointer to allocate memory for the next task's stack.
+            self.next_stack_addr += total_task_stack_size;
+
             self.tasks_count += 1;
             return task_id;
         }

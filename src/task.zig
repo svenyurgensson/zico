@@ -53,7 +53,7 @@ pub const TaskState = enum(u4) {
     waiting_on_channel_receive = 8,
 };
 
-pub const TaskFlags = struct {
+pub const TaskFlags = packed struct {
     state: TaskState,
     has_message: bool,
     priority: u3,
@@ -65,6 +65,7 @@ pub const TSS = struct {
     wait_obj: ?*anyopaque,
     delay_timer: u16,
     flags: TaskFlags,
+    _padding: u8 = 0,
 
     pub fn init(entry_point: u32, stack_ptr: u32) TSS {
         return .{
