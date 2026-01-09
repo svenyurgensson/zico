@@ -10,15 +10,12 @@ pub const Channel = sync.Channel;
 pub const Semaphore = sync.Semaphore;
 pub const TaskDef = task.TaskDef;
 
+export var g_zico_instance: ?*anyopaque = null;
+
 var schedule_fn: ?*const fn () callconv(.naked) void = null;
 
 pub inline fn getZicoInstance() *anyopaque {
-    var zico_ptr: *anyopaque = undefined;
-    asm ("mv %[ptr], tp"
-        : [ptr] "=r" (zico_ptr),
-        :
-        : .{});
-    return zico_ptr;
+    return g_zico_instance.?;
 }
 
 // This is the idle task. It runs when no other tasks are ready to run.
@@ -168,6 +165,8 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
                 .next_stack_addr = @intFromPtr(&stacks_storage),
             };
 
+            g_zico_instance = (&self)[0..0].ptr;
+
             const scheduler_stack_top = @intFromPtr(&scheduler_stack) + SCHEDULER_STACK_SIZE;
             asm volatile (
                 \\ csrw mscratch, %[stack_top]
@@ -222,23 +221,21 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
         }
 
         pub fn runLoop(self: *Self) noreturn {
-            asm volatile (
-                \\ mv tp, %[zico_ptr]
-                :
-                : [zico_ptr] "r" (self),
-                : .{});
             if (self.tasks_count == 0) @panic("Cannot run scheduler with no tasks");
+
+            // The scheduler always starts with the first task, which is the idle task.
             self.current_task = 0;
             const current_task_ref = &self.tasks[self.current_task];
             const next_pc = current_task_ref.next_addr;
             const next_sp = current_task_ref.sp;
+
             hal.cpu.csr.mepc.write(next_pc);
             asm volatile (
                 \\ mv sp, %[sp]
                 \\ mret
                 :
                 : [sp] "r" (next_sp),
-                : .{ .x4 = true });
+                : .{});
             unreachable;
         }
 
@@ -285,9 +282,13 @@ export fn scheduleNextTask() callconv(.naked) void {
         \\ sw ra, 0(sp)
         \\ 
         // 3. Prepare arguments for zico_scheduler_logic(self_ptr: *anyopaque, current_sp: u32)
-        //    - arg0 (a0): self_ptr, which is already in the 'tp' register.
+        //    - arg0 (a0): self_ptr, loaded from the global g_zico_instance.
         //    - arg1 (a1): The interrupted task's SP, which is now in 'mscratch'.
-        \\ mv a0, tp 
+        \\ .option push
+        \\ .option norelax
+        \\ la a0, g_zico_instance
+        \\ .option pop
+        \\ lw a0, (a0)
         \\ csrr a1, mscratch
         \\ 
         // 4. Call the C ABI scheduler logic function.

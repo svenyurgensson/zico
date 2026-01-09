@@ -41,14 +41,6 @@ pub const interrupts: hal.interrupts.VectorTable = .{
 };
 
 pub fn main() void {
-    // WORKAROUND: The default _start code sets mtvec to 3, which provides no base address for exceptions like `ecall`.
-    // We set mtvec to `0x190 | 3` to set the exception base to our handler (`zico.switchTaskISR` at 0x190)
-    // while keeping fast interrupt mode (3) enabled for PFIC-handled interrupts like SysTick.
-    asm volatile (
-        \\ li a5, 0x193
-        \\ csrw mtvec, a5
-        ::: .{ .x10 = true });
-
     const clock = hal.clock.setOrGet(.hsi_max);
     hal.time.init(clock);
 
@@ -57,6 +49,7 @@ pub fn main() void {
 
     scheduler = Scheduler.init();
 
+    hal.interrupts.enable(.SW);
     hal.interrupts.globalEnable();
 
     scheduler.runLoop();
