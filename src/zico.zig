@@ -52,7 +52,14 @@ export fn zico_scheduler_logic(self_ptr: *anyopaque, current_sp: u32) *const tas
     const outgoing_task_tss = &self.tasks[self.current_task];
     outgoing_task_tss.sp = current_sp;
 
-    outgoing_task_tss.next_addr = hal.cpu.csr.mepc.read() + 4;
+    outgoing_task_tss.next_addr = blk: {
+        const mepc = hal.cpu.csr.mepc.read();
+        // Read the instruction at mepc to determine its size.
+        // RISC-V instructions are 2 bytes if the two LSBs are not '11', and 4 bytes otherwise.
+        const instruction = @as(*const u16, @ptrFromInt(mepc)).*;
+        const instruction_size: u32 = if ((instruction & 0b11) == 0b11) 4 else 2;
+        break :blk mepc + instruction_size;
+    };
 
     const ecall_type_raw = syscall.ecall_args_ptr.a0;
     const ecall_type: syscall.EcallType = @enumFromInt(@as(u8, @truncate(ecall_type_raw)));
