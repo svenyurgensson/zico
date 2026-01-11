@@ -24,7 +24,8 @@ pub inline fn getZicoInstance() *anyopaque {
 fn idleTask() void {
     while (true) {
         syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.yield); // set yield() operation code
-        asm volatile ("ecall" ::: syscall.ClobbersForEcall);
+        syscall.triggerSoftwareInterrupt();
+        //asm volatile ("ecall" ::: syscall.ClobbersForEcall);
     }
 }
 
@@ -46,6 +47,7 @@ pub fn wakeTask(task_id: u8) void {
 
 export fn zico_scheduler_logic(self_ptr: *anyopaque, current_sp: u32) *const task.TSS {
     const self: *ZicoHeader = @ptrCast(@alignCast(self_ptr));
+    syscall.cleanSoftwareInterrupt();
 
     const outgoing_task_tss = &self.tasks[self.current_task];
     outgoing_task_tss.sp = current_sp;
@@ -180,23 +182,29 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
             inline for (task_defs) |task_def| {
                 _ = self.addTask(task_def.func, task_def.stack_size) catch @panic("Failed to add user task");
             }
+
+            syscall.enableSoftwareInterrupt();
+            hal.interrupts.enable(.SW);
             return self;
         }
 
         pub inline fn yield(_: *Self) void {
             syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.yield);
-            asm volatile ("ecall" ::: syscall.ClobbersForEcall);
+            syscall.triggerSoftwareInterrupt();
+            //asm volatile ("ecall" ::: syscall.ClobbersForEcall);
         }
 
         pub inline fn suspendSelf(_: *Self) void {
             syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.suspend_self);
-            asm volatile ("ecall" ::: syscall.ClobbersForEcall);
+            syscall.triggerSoftwareInterrupt();
+            //asm volatile ("ecall" ::: syscall.ClobbersForEcall);
         }
 
         pub inline fn delay(_: *Self, N: u16) void {
             syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.delay);
             syscall.ecall_args_ptr.a1 = N;
-            asm volatile ("ecall" ::: syscall.ClobbersForEcall);
+            syscall.triggerSoftwareInterrupt();
+            //asm volatile ("ecall" ::: syscall.ClobbersForEcall);
         }
 
         pub fn suspendTask(self: *Self, comptime task_id: Self.TaskID) void {

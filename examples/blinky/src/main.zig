@@ -49,7 +49,6 @@ pub fn main() void {
 
     scheduler = Scheduler.init();
 
-    hal.interrupts.enable(.SW);
     hal.interrupts.globalEnable();
 
     scheduler.runLoop();
