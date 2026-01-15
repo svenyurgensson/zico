@@ -48,6 +48,7 @@ pub fn main() void {
     led.asOutput(.{ .speed = .max_50mhz, .mode = .push_pull });
 
     scheduler = Scheduler.init();
+    //zico.g_zico_instance = &scheduler;
 
     hal.interrupts.globalEnable();
 

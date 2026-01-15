@@ -81,7 +81,7 @@ pub fn Channel(comptime T: type, comptime size: usize) type {
             if (self.header.count >= size) {
                 syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.channel_send);
                 syscall.ecall_args_ptr.a1 = @intFromPtr(&self.header.send_wait_queue);
-                asm volatile ("ecall" ::: syscall.ClobbersForEcall);
+                syscall.triggerSoftwareInterrupt();
                 return self.send(message);
             }
 
@@ -101,7 +101,7 @@ pub fn Channel(comptime T: type, comptime size: usize) type {
             if (self.header.count == 0) {
                 syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.channel_receive);
                 syscall.ecall_args_ptr.a1 = @intFromPtr(&self.header.recv_wait_queue);
-                asm volatile ("ecall" ::: syscall.ClobbersForEcall);
+                syscall.triggerSoftwareInterrupt();
                 return self.receive();
             }
 
@@ -139,7 +139,7 @@ pub const Semaphore = struct {
             // Block and let the scheduler add this task to the wait queue.
             syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.sem_wait);
             syscall.ecall_args_ptr.a1 = @intFromPtr(self);
-            asm volatile ("ecall" ::: syscall.ClobbersForEcall);
+            syscall.triggerSoftwareInterrupt();
         }
     }
     pub fn signal(self: *Semaphore) void {

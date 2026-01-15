@@ -68,6 +68,6 @@ pub fn build(b: *std.Build) void {
     //      ┌──────────────────────────────────────────────────────────┐
     //      │                        minichlink                        │
     //      └──────────────────────────────────────────────────────────┘
-    const minichlink_step = b.step("minichlink", "minichlink");
-    ch32.addMinichlink(b, ch32_dep, minichlink_step);
+    //const minichlink_step = b.step("minichlink", "minichlink");
+    //ch32.addMinichlink(b, ch32_dep, minichlink_step);
 }
