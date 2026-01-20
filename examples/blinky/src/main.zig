@@ -26,7 +26,7 @@ fn debug_task() void {
 // Создаем comptime-массив с определениями задач и стеком для каждой (в байтах)
 const AppTaskDefs = [_]zico.TaskDef{
     .{ .name = "led", .func = &led_task, .stack_size = 4 * 16 },
-    .{ .name = "debug", .func = &debug_task, .stack_size = 4 * 3 },
+    .{ .name = "debug", .func = &debug_task, .stack_size = 4 * 8 },
 };
 
 // Генерируем тип планировщика
@@ -48,7 +48,6 @@ pub fn main() void {
     led.asOutput(.{ .speed = .max_50mhz, .mode = .push_pull });
 
     scheduler = Scheduler.init();
-    //zico.g_zico_instance = &scheduler;
 
     hal.interrupts.globalEnable();
 

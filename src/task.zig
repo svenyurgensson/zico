@@ -59,7 +59,7 @@ pub const TaskFlags = packed struct {
     priority: u3,
 };
 
-pub const TSS = struct {
+pub const TSS = extern struct {
     sp: u32,
     next_addr: u32,
     wait_obj: ?*anyopaque,
