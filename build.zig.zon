@@ -1,6 +1,6 @@
 .{
     .name = .zico,
-    .version = "0.0.1",
+    .version = "1.0.0",
     .dependencies = .{
         .ch32 = .{
             .url = "https://github.com/ghostiam/ch32_zig/archive/refs/heads/master.zip",
