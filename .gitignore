@@ -5,7 +5,10 @@ zig-out/
 tmp/
 docs/
 GEMINI.md
+.geminiignore
 mise.toml
 *.s
-*.pdf
+*.asm--
+*.pdf--
 *.gdb
+.gdbinit

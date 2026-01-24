@@ -148,7 +148,7 @@ pub var scheduler: Scheduler = undefined;
 // 4. Define your interrupt vector table using ch32_zig's HAL
 pub const interrupts: hal.interrupts.VectorTable = .{
     .SysTick = hal.time.sysTickHandler,
-    .SW = Scheduler.SoftwareInterruptHandler, // Use zico's software interrupt handler
+    .HardFault = zico.InterruptHandler, // Use zico's software interrupt handler
 };
 
 // 5. Initialize and run the scheduler in main
@@ -167,6 +167,10 @@ pub fn main() !void {
     scheduler.runLoop();
 }
 ```
+
+### Debugging with VS Code
+
+For convenient debugging, a `dev_resources/vscode` directory is provided, containing sample VS Code debugger configurations. You can copy these configurations to your project's `.vscode` directory to quickly set up debugging.
 
 ## Public API
 
@@ -410,6 +414,33 @@ const AppTaskDefs = [_]zico.TaskDef{
 
 
 
+
+## Configuration
+
+You can customize certain `zico` parameters at compile-time by defining public constants in your project's root source file (e.g., `src/main.zig`).
+
+### `ZICO_MAX_WAITING_TASKS`
+
+This constant defines the maximum number of tasks that can be waiting on a single semaphore or channel at any given time.
+
+-   **Type:** `usize`
+-   **Default:** `8`
+
+If you need to support more waiting tasks for a synchronization object, you can increase this value. Note that this will increase the RAM usage for every `Semaphore` and `Channel` instance.
+
+#### Example
+
+To change the wait queue size to 16, add the following line to the top of your `src/main.zig`:
+
+```zig
+// Set the max waiting tasks for all semaphores and channels to 16
+pub const ZICO_MAX_WAITING_TASKS = 16;
+
+const std = @import("std");
+const hal = @import("hal");
+const zico = @import("zico");
+// ... rest of your code
+```
 
 ## Important information!
 

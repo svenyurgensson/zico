@@ -1,8 +1,15 @@
 const std = @import("std");
 const zico = @import("./zico.zig");
 const syscall = @import("./syscall.zig");
+const root = @import("root");
 
-const MAX_WAITING_TASKS = 8;
+const MAX_WAITING_TASKS = blk: {
+    if (@hasDecl(root, "ZICO_MAX_WAITING_TASKS")) {
+        break :blk root.ZICO_MAX_WAITING_TASKS;
+    } else {
+        break :blk 8;
+    }
+};
 
 pub const WaitQueue = struct {
     tasks: [MAX_WAITING_TASKS]u8 = undefined,
@@ -79,9 +86,8 @@ pub fn Channel(comptime T: type, comptime size: usize) type {
 
         pub fn send(self: *Self, message: T) void {
             if (self.header.count >= size) {
-                syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.channel_send);
-                syscall.ecall_args_ptr.a1 = @intFromPtr(&self.header.send_wait_queue);
-                syscall.triggerSoftwareInterrupt();
+                setSchedulerCmdArg(.channel_send, @intFromPtr(&self.header.send_wait_queue));
+                syscall.trigger();
                 return self.send(message);
             }
 
@@ -99,9 +105,8 @@ pub fn Channel(comptime T: type, comptime size: usize) type {
 
         pub fn receive(self: *Self) T {
             if (self.header.count == 0) {
-                syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.channel_receive);
-                syscall.ecall_args_ptr.a1 = @intFromPtr(&self.header.recv_wait_queue);
-                syscall.triggerSoftwareInterrupt();
+                setSchedulerCmdArg(.channel_receive, @intFromPtr(&self.header.recv_wait_queue));
+                syscall.trigger();
                 return self.receive();
             }
 
@@ -136,10 +141,8 @@ pub const Semaphore = struct {
         if (self.count > 0) {
             self.count -= 1;
         } else {
-            // Block and let the scheduler add this task to the wait queue.
-            syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.sem_wait);
-            syscall.ecall_args_ptr.a1 = @intFromPtr(self);
-            syscall.triggerSoftwareInterrupt();
+            setSchedulerCmdArg(.sem_wait, @intFromPtr(self));
+            syscall.trigger();
         }
     }
     pub fn signal(self: *Semaphore) void {
@@ -152,6 +155,15 @@ pub const Semaphore = struct {
         }
     }
 };
+
+fn setSchedulerCmdArg(cmd: syscall.EcallType, arg: u32) void {
+    const zico_ptr = asm volatile (
+        \\ mv %[zico_ptr], tp
+        : [zico_ptr] "=r" (-> *u32),
+    );
+    const scheduler: *zico.ZicoHeader = @ptrCast(@alignCast(zico_ptr));
+    scheduler.setEcallCmdWithArg(cmd, arg);
+}
 
 test "WaitQueue functionality" {
     var queue = WaitQueue{};
@@ -193,7 +205,7 @@ test "WaitQueue functionality" {
     // Continue dequeuing and checking order
     try std.testing.expect(queue.dequeue().? == MAX_WAITING_TASKS / 2);
     try std.testing.expect(queue.dequeue().? == MAX_WAITING_TASKS / 2 + 1);
-    
+
     // Dequeue remaining
     while (queue.dequeue()) |task_id| {
         _ = task_id;

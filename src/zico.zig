@@ -1,7 +1,5 @@
 const std = @import("std");
 const hal = @import("hal");
-const svd = @import("svd");
-const PFIC = svd.peripherals.PFIC;
 const task = @import("./task.zig");
 const sync = @import("./sync.zig");
 const syscall = @import("./syscall.zig");
@@ -14,17 +12,30 @@ pub const TaskDef = task.TaskDef;
 // It simply yields control back to the scheduler immediately, preventing the CPU from
 // wasting cycles and ensuring the scheduler always has something to execute.
 fn idleTask() void {
+    const zico_ptr = asm volatile (
+        \\ mv %[zico_ptr], tp
+        : [zico_ptr] "=r" (-> *u32),
+    );
+    const scheduler: *ZicoHeader = @ptrCast(@alignCast(zico_ptr));
     while (true) {
-        syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.yield); // set yield() operation code
-        syscall.triggerSoftwareInterrupt();
-        //asm volatile ("ecall" ::: syscall.ClobbersForEcall);
+        scheduler.setEcallCmd(.yield);
+        syscall.trigger();
     }
 }
 
-const ZicoHeader = struct {
+pub const ZicoHeader = struct {
     tasks: []task.TSS,
     current_task: u8,
     last_timer_update_ms: u32,
+    ecall_args: syscall.EcallArgs,
+
+    pub inline fn setEcallCmd(self: *ZicoHeader, cmd: syscall.EcallType) void {
+        self.ecall_args.a0 = @intFromEnum(cmd);
+    }
+    pub inline fn setEcallCmdWithArg(self: *ZicoHeader, cmd: syscall.EcallType, arg: u32) void {
+        self.ecall_args.a0 = @intFromEnum(cmd);
+        self.ecall_args.a1 = arg;
+    }
 };
 
 pub fn wakeTask(task_id: u8) void {
@@ -39,16 +50,25 @@ pub fn wakeTask(task_id: u8) void {
 }
 // expected sp to be in a0
 export fn zico_scheduler_logic(current_sp: u32) *const task.TSS {
-    const self_ptr = asm volatile (
+    const zico_ptr = asm volatile (
         \\ mv %[zico_ptr], tp
         : [zico_ptr] "=r" (-> *u32),
     );
-    const self: *ZicoHeader = @ptrCast(@alignCast(self_ptr));
+    const self: *ZicoHeader = @ptrCast(@alignCast(zico_ptr));
 
     const outgoing_task = &self.tasks[self.current_task];
     outgoing_task.sp = current_sp;
-    outgoing_task.next_addr = hal.cpu.csr.mepc.read();
-    const ecall_type_raw = syscall.ecall_args_ptr.a0;
+    const mepc_value = syscall.readMepc();
+
+    // correcting return address, depends of ecall: compressed or not
+    const instr: u16 = @as(*volatile u16, @ptrFromInt(mepc_value)).*;
+    if ((instr & 0x3) == 0x3) {
+        outgoing_task.next_addr = mepc_value + 4; // 32-bit
+    } else {
+        outgoing_task.next_addr = mepc_value + 2; // 16-bit
+    }
+
+    const ecall_type_raw = self.ecall_args.a0;
     const ecall_type: syscall.EcallType = @enumFromInt(@as(u8, @truncate(ecall_type_raw)));
 
     switch (ecall_type) {
@@ -56,7 +76,7 @@ export fn zico_scheduler_logic(current_sp: u32) *const task.TSS {
             outgoing_task.setState(.ready);
         },
         .delay => {
-            const ecall_arg = syscall.ecall_args_ptr.a1;
+            const ecall_arg = self.ecall_args.a1;
             outgoing_task.setState(.waiting_on_timer);
             outgoing_task.setDelayTimer(@truncate(ecall_arg));
         },
@@ -64,17 +84,17 @@ export fn zico_scheduler_logic(current_sp: u32) *const task.TSS {
             outgoing_task.setState(.suspended);
         },
         .sem_wait => {
-            const sem: *sync.Semaphore = @ptrFromInt(syscall.ecall_args_ptr.a1);
+            const sem: *sync.Semaphore = @ptrFromInt(self.ecall_args.a1);
             sem.wait_queue.enqueue(self.current_task) catch @panic("Semaphore wait queue full!");
             outgoing_task.setState(.waiting_on_semaphore);
         },
         .channel_send => {
-            const queue: *sync.WaitQueue = @ptrFromInt(syscall.ecall_args_ptr.a1);
+            const queue: *sync.WaitQueue = @ptrFromInt(self.ecall_args.a1);
             queue.enqueue(self.current_task) catch @panic("Channel send wait queue full!");
             outgoing_task.setState(.waiting_on_channel_send);
         },
         .channel_receive => {
-            const queue: *sync.WaitQueue = @ptrFromInt(syscall.ecall_args_ptr.a1);
+            const queue: *sync.WaitQueue = @ptrFromInt(self.ecall_args.a1);
             queue.enqueue(self.current_task) catch @panic("Channel receive wait queue full!");
             outgoing_task.setState(.waiting_on_channel_receive);
         },
@@ -119,9 +139,7 @@ export fn zico_scheduler_logic(current_sp: u32) *const task.TSS {
     }
     self.current_task = @as(u8, @intCast(next_task_idx));
 
-    syscall.cleanSoftwareInterrupt();
-    hal.interrupts.clearPending(.SW);
-    return &self.tasks[self.current_task]; // return in a0
+    return &self.tasks[self.current_task]; // return ptr to current task in a0
 }
 
 pub fn Zico(comptime task_defs: []const task.TaskDef) type {
@@ -131,13 +149,14 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
         tasks: []task.TSS,
         current_task: u8 = 0,
         last_timer_update_ms: u32 = 0,
+        ecall_args: syscall.EcallArgs = .{ .a0 = 0, .a1 = 0 },
 
         pub const TaskUnion = task.CreateTaskUnion(task_defs);
         pub const TaskID = @typeInfo(TaskUnion).@"union".tag_type.?;
 
-        const MINIMAL_CONTEXT_STACK_SIZE: usize = 64;
+        const MINIMAL_CONTEXT_STACK_SIZE: usize = 48;
         const SCHEDULER_STACK_SIZE: usize = 64;
-        const IDLE_TASK_STACK_SIZE: usize = 32; // Changed from 24 to 32
+        const IDLE_TASK_STACK_SIZE: usize = 32; //
 
         const TOTAL_STACK_SIZE = blk: {
             var total: usize = 0;
@@ -165,8 +184,6 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
         var stacks_storage: [TOTAL_STACK_SIZE]u8 align(16) = undefined; // Changed align(8) to align(16)
         var scheduler_stack: [SCHEDULER_STACK_SIZE]u8 align(8) = undefined;
 
-        pub const SoftwareInterruptHandler = @as(hal.interrupts.Handler, @ptrCast(&switchTaskISR));
-
         pub fn init() Self {
             var self = Self{
                 .tasks = &tasks_storage,
@@ -175,6 +192,7 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
             };
 
             const scheduler_stack_top = @intFromPtr(&scheduler_stack) + SCHEDULER_STACK_SIZE;
+            // saving scheduler stack ptr to mscratch
             asm volatile (
                 \\ csrw mscratch, %[stack_top]
                 :
@@ -200,27 +218,22 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
 
             self.last_timer_update_ms = hal.time.millis();
 
-            syscall.enableSoftwareInterrupt();
-            hal.interrupts.enable(.SW);
             return self;
         }
 
-        pub inline fn yield(_: *Self) void {
-            syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.yield);
-            syscall.triggerSoftwareInterrupt();
+        pub inline fn yield(self: *Self) void {
+            self.setEcallCmd(.yield);
+            syscall.trigger();
         }
 
-        pub inline fn suspendSelf(_: *Self) void {
-            syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.suspend_self);
-            syscall.triggerSoftwareInterrupt();
-            //asm volatile ("ecall" ::: syscall.ClobbersForEcall);
+        pub inline fn suspendSelf(self: *Self) void {
+            self.setEcallCmd(.suspend_self);
+            syscall.trigger();
         }
 
-        pub inline fn delay(_: *Self, N: u16) void {
-            syscall.ecall_args_ptr.a0 = @intFromEnum(syscall.EcallType.delay);
-            syscall.ecall_args_ptr.a1 = N;
-            syscall.triggerSoftwareInterrupt();
-            //asm volatile ("ecall" ::: syscall.ClobbersForEcall);
+        pub inline fn delay(self: *Self, N: u16) void {
+            self.setEcallCmdWithArg(.delay, N);
+            syscall.trigger();
         }
 
         pub fn suspendTask(self: *Self, comptime task_id: Self.TaskID) void {
@@ -245,6 +258,7 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
         }
 
         pub fn runLoop(self: *Self) noreturn {
+            // save ptr to scheduler into tp register, so that the ISR can access it
             asm volatile (
                 \\ mv tp, %[s]
                 :
@@ -259,69 +273,88 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
             const next_pc = current_task_ref.next_addr;
             const next_sp = current_task_ref.sp;
 
-            // Take first task from list
-            hal.cpu.csr.mepc.write(next_pc);
+            // Setup and return to the first task from list
             asm volatile (
-                \\ li t0, 0x1880
-                \\ csrw mstatus, t0
-                \\ li t0, 0x3
-                \\ csrw 0x804, t0
+                \\ csrw mepc, %[my_mepc] 
                 \\ mv sp, %[sp]
+                // INTSYSCR = .hwstken = 1, .inesten = 1, .eabien = 0 <---this 0 is important !!!
+                \\ li a2, 3
+                \\ csrw 0x804, a2
                 \\ mret
                 :
                 : [sp] "r" (next_sp),
+                  [my_mepc] "r" (next_pc),
                 : .{});
             unreachable;
+        }
+
+        pub inline fn setEcallCmd(self: *Self, cmd: syscall.EcallType) void {
+            self.ecall_args.a0 = @intFromEnum(cmd);
+        }
+
+        pub inline fn setEcallCmdWithArg(self: *Self, cmd: syscall.EcallType, arg: u32) void {
+            self.ecall_args.a0 = @intFromEnum(cmd);
+            self.ecall_args.a1 = arg;
         }
     };
 }
 
-export fn switchTaskISR() callconv(.naked) void {
+pub const InterruptHandler = @as(hal.interrupts.Handler, @ptrCast(&switchTaskISR));
+
+pub export fn switchTaskISR() align(4) callconv(.naked) void {
     asm volatile (
     // The hardware has already pushed 16 caller-saved registers onto the current task's stack.
-    // 1. Manually save the callee-saved registers (s0, s1) on the same stack.
-        \\ addi sp, sp, -8
-        \\ sw s0, 4(sp)
-        \\ sw s1, 0(sp)
+    // Manually save the callee-saved registers (s0, s1) on the same stack.
+        \\ addi sp, sp, -16
+        \\ sw s0, 12(sp)
+        \\ sw s1, 8(sp)
 
         // The full context is now on the task's stack.
-        // 2. Prepare argument for scheduler: move current SP (the task's SP) into a0.
+        // Prepare argument for scheduler: move current SP (the task's SP) into a0.
         \\ mv a0, sp
 
-        // 3. Switch to the scheduler's stack. The scheduler's stack pointer is stored
+        // Switch to the scheduler's stack. The scheduler's stack pointer is stored
         //    in `mscratch` and is only read, not modified.
         \\ csrr sp, mscratch
 
         // We are now on the scheduler's private stack.
-        // 4. Save `ra` before making a function call.
+        // Save `ra` before making a function call.
         \\ addi sp, sp, -4
         \\ sw ra, 0(sp)
 
-        // 5. Call the scheduler logic. `a0` (current_sp) is already set.
+        // Call the scheduler logic. `a0` (current_sp) is already set.
         \\ jal ra, %[logic]
 
-        // After return, a0 holds the pointer to the next task's TSS.
-        // 5. Restore `ra` and the scheduler's stack frame.
+        // After the scheduler returns, a0 holds the pointer to the next task's TSS.
+        // Disable global interrupts to ensure atomic context restoration.
+        \\ csrr t0, mstatus
+        \\ li t1, 8 # MIE bit
+        \\ not t1, t1
+        \\ and t0, t0, t1
+        \\ csrw mstatus, t0
+
+        // Restore `ra` and the scheduler's stack frame.
         \\ lw ra, 0(sp)
         \\ addi sp, sp, 4
 
-        // 6. Get the next task's stack pointer (which points to its saved context frame) from its TSS.
+        // Get the next task's stack pointer (which points to its saved context frame) from its TSS.
         \\ lw sp, 0(a0)
 
-        // 7. Restore the callee-saved registers for the new task from its stack.
-        \\ lw s1, 0(sp)
-        \\ lw s0, 4(sp)
-        \\ addi sp, sp, 8
+        // Restore the callee-saved registers for the new task from its stack.
+        \\ lw s1, 8(sp)
+        \\ lw s0, 12(sp)
+        \\ addi sp, sp, 16
 
-        // 8. Restore mepc for the new task from its TSS.
+        // Restore mepc for the new task from its TSS.
         \\ lw a1, 4(a0)
         \\ csrw mepc, a1
         :
         : [logic] "i" (zico_scheduler_logic),
         : .{ .memory = true, .x1 = true, .x5 = true, .x6 = true, .x8 = true, .x9 = true, .x10 = true, .x11 = true });
 
+    // separate instruction to easy debugging
     asm volatile (
-    // 9. Return from exception. The hardware will now pop the 16 caller-saved registers
+    // Return from exception. The hardware will now pop the 16 caller-saved registers
     //    from the task's stack, completing the context restore.
         \\ mret
     );

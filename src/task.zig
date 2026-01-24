@@ -45,12 +45,12 @@ pub fn CreateTaskUnion(comptime definitions: []const TaskDef) type {
 
 pub const TaskState = enum(u4) {
     idle = 0,
-    ready = 2,
-    suspended = 3,
-    waiting_on_timer = 4,
-    waiting_on_semaphore = 5,
-    waiting_on_channel_send = 7,
-    waiting_on_channel_receive = 8,
+    ready = 1,
+    suspended = 2,
+    waiting_on_timer = 3,
+    waiting_on_semaphore = 4,
+    waiting_on_channel_send = 5,
+    waiting_on_channel_receive = 6,
 };
 
 pub const TaskFlags = packed struct {
@@ -62,7 +62,6 @@ pub const TaskFlags = packed struct {
 pub const TSS = extern struct {
     sp: u32,
     next_addr: u32,
-    wait_obj: ?*anyopaque,
     delay_timer: u16,
     flags: TaskFlags,
     _padding: u8 = 0,
@@ -72,7 +71,6 @@ pub const TSS = extern struct {
             .sp = stack_ptr,
             .next_addr = entry_point,
             .flags = .{ .state = .idle, .has_message = false, .priority = 0 },
-            .wait_obj = null,
             .delay_timer = 0,
         };
     }

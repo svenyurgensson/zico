@@ -1,0 +1,103 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build",
+            "type": "shell",
+            "options": {
+                "env": {
+                    "PATH": "$PATH:/opt/homebrew/opt/binutils/bin:/Users/jurbat/projects/ElectroProjects/risc-v/zico/xpacks/.bin"
+                }
+            },
+            "command": "zig",
+            "args": ["build"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always"
+            },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Run QEMU",
+            "type": "shell",
+            "command": "echo 'QEMU started'; qemu-system-riscv32 -nographic -machine sifive_e -cpu rv32e -device loader,file=${workspaceFolder}/zig-out/firmware/${workspaceFolder}_ch32v003.elf,addr=0x0,cpu-num=0 -S -s",
+            "windows": {
+                "command": "echo 'QEMU started'; qemu-system-riscv32.exe -nographic -cpu rv32e -serial mon:stdio -machine virt -S -s -bios ${workspaceFolder}/zig-out/firmware/${workspaceFolder}_ch32v003.elf"
+            },
+            "dependsOn": ["Build"],
+            "isBackground": true,
+            "problemMatcher": [
+                {
+                    "pattern": {
+                        "regexp": ".",
+                        "file": 1,
+                        "location": 2,
+                        "message": 3
+                    },
+                    "background": {
+                        "activeOnStart": true,
+                        "beginsPattern": ".",
+                        "endsPattern": "QEMU started"
+                    }
+                }
+            ]
+        },
+        {
+            "label": "Run OCD", 
+            "type": "shell",
+            "command": "/opt/wch-riscv-openocd/bin/wch-riscv-openocd -f {workspaceFolder}/.vscode/wch-riscv.cfg",
+            "group": "none",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": {
+                    "regexp": "^$" // empty
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "Open On-Chip Debugger",
+                    "endsPattern": "Listening on port \\d+ for gdb connections"
+                }
+            }
+        },
+                {
+            "label": "Stop OCD", 
+            "type": "shell",
+            "command": "pkill openocd",
+            "group": "none",
+            "isBackground": true,
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": {
+                "pattern": {
+                    "regexp": "^$" // empty
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "Open On-Chip Debugger",
+                    "endsPattern": "Listening on port \\d+ for gdb connections"
+                }
+            }
+        },
+        {
+            "label": "Flash chip", 
+            "type": "shell",
+            "command": "mise flash",
+            "group": "none",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        }
+
+    ]
+}

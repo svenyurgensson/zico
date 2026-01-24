@@ -36,7 +36,7 @@ pub var scheduler: Scheduler = undefined;
 
 pub const interrupts: hal.interrupts.VectorTable = .{
     .SysTick = hal.time.sysTickHandler,
-    .SW = Scheduler.SoftwareInterruptHandler,
+    .HardFault = zico.InterruptHandler,
 };
 
 pub fn main() !void {

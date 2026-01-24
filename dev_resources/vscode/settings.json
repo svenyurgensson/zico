@@ -1,0 +1,10 @@
+{
+    "cortex-debug.openocdPath.osx": "/opt/wch-riscv-openocd/bin/wch-riscv",
+    "cortex-debug.openocdPath": "/opt/wch-riscv-openocd/bin/wch-riscv",
+    "cortex-debug.enableTelemetry": false,
+    "cortex-debug.configFiles": "/opt/wch-riscv-openocd/bin/wch-riscv.cfg",
+    "cortex-debug.registerUseNaturalFormat": false,
+    "cortex-debug.variableUseNaturalFormat": false,
+
+    "debug.console.fontSize": 15,
+}

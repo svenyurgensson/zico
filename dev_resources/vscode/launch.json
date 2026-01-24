@@ -1,0 +1,49 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "OCD Debug RISC-V",
+            "type": "cortex-debug",
+            "request": "launch",
+            "executable": "${workspaceFolder}/zig-out/firmware/${workspaceFolderBasename}_ch32v003.elf",
+            "loadFiles": ["${workspaceFolder}/zig-out/firmware/${workspaceFolderBasename}_ch32v003.elf"],
+            "symbolFiles": [{
+                "file": "${workspaceFolder}/zig-out/firmware/${workspaceFolderBasename}_ch32v003.elf"
+            }],
+            "cwd": "${workspaceFolder}",
+            "runToEntryPoint": "main.main",
+            "servertype": "openocd",
+            "armToolchainPath": "/Users/jurbat/projects/ElectroProjects/risc-v/zico/xpacks/.bin",
+            "toolchainPrefix": "riscv-none-elf",
+            "postLaunchCommands": [
+                "set mem inaccessible-by-default off",
+                "set architecture riscv:rv32",
+                "set riscv use-compressed-breakpoints on",
+                "set remotetimeout unlimited"
+            ],
+            "serverpath": "/opt/wch-riscv-openocd/bin/wch-riscv",
+            "configFiles": [
+                "/opt/wch-riscv-openocd/bin/wch-riscv.cfg"
+            ],
+            "svdFile": "${workspaceFolder}/../../docs/CH32V003.svd",
+            //"showDevDebugOutput": "raw"
+        },
+         {
+            "name": "LLDB Debug Zig",            
+            "type": "lldb", 
+            "request": "attach",
+            "targetCreateCommands": [
+                "target create ${workspaceFolder}/zig-out/firmware/${workspaceFolderBasename}_ch32v003.elf"
+            ],
+            "preLaunchTask": "Run OCD",
+            "postDebugTask": "Stop OCD", 
+            "sourceLanguages": ["zig"],
+            "processCreateCommands": [
+                "gdb-remote localhost:3333"
+            ]    
+        }
+    ]
+}

@@ -1,13 +1,7 @@
-const svd = @import("svd");
-const PFIC = svd.peripherals.PFIC;
-
 pub const EcallArgs = struct {
     a0: u32,
     a1: u32,
 };
-pub var ecall_args: EcallArgs = .{ .a0 = 0, .a1 = 0 };
-pub const ecall_args_ptr: *volatile EcallArgs = &ecall_args;
-
 // Temporary commenting out some clobbers, still not convincied that they should be here.
 pub const ClobbersForEcall = .{
     .memory = true,
@@ -37,20 +31,13 @@ pub const EcallType = enum(u8) {
     channel_receive = 6,
 };
 
-const PFIC_IPSR0: *volatile u32 = @ptrFromInt(0xE000E200);
-
-pub inline fn triggerSoftwareInterrupt() void {
-    PFIC.STK_CTLR.modify(.{ .SWIE = 1 });
-    //PFIC_IPSR0.* = 0x0C | (1 << 14);
+pub inline fn trigger() void {
+    asm volatile ("ecall" ::: ClobbersForEcall);
 }
 
-pub inline fn cleanSoftwareInterrupt() void {
-    PFIC.STK_CTLR.modify(.{ .SWIE = 0 });
-    //PFIC_IPSR0.* = 0x0C;
-}
-
-pub inline fn enableSoftwareInterrupt() void {
-    const PFIC_IENR0: *volatile u32 = @ptrFromInt(0xE000E100);
-    // Разрешить прерывание с кодом 14 (бит 14 в регистре IENR0)
-    PFIC_IENR0.* = (1 << 14);
+pub inline fn readMepc() u32 {
+    return asm volatile (
+        \\ csrr %[result], mepc
+        : [result] "=r" (-> u32),
+    );
 }
