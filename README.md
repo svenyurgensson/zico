@@ -1,6 +1,6 @@
-# zico - Coroutine Scheduler for RISC-V
+# zico - A Tiny-Coroutine Scheduler for RISC-V MCUs
 
-`zico` is a lightweight, stackful coroutine (task) scheduler designed for resource-constrained microcontrollers, specifically targeting the CH32V003 RISC-V MCU. It is designed to be used in conjunction with the `ch32_zig` Hardware Abstraction Layer (HAL) library.
+`zico` is a lightweight, stackful coroutine (task) scheduler designed for resource-constrained microcontrollers, specifically targeting the `CH32V003` RISC-V MCU. It is designed to be used in conjunction with the `ch32_zig` Hardware Abstraction Layer (HAL) library.
 
 It provides a simple, cooperative multitasking environment with minimal memory footprint.
 

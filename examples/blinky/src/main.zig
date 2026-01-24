@@ -40,12 +40,16 @@ pub const interrupts: hal.interrupts.VectorTable = .{
     .HardFault = zico.InterruptHandler,
 };
 
-pub fn main() void {
+// build, flash, then `minichlink -b -T`
+pub fn main() !void {
     const clock = hal.clock.setOrGet(.hsi_max);
     hal.time.init(clock);
 
     led.enablePort();
     led.asOutput(.{ .speed = .max_50mhz, .mode = .push_pull });
+
+    hal.debug.sdi_print.init();
+    _ = try hal.debug.sdi_print.write("Hello, World!\r\n");
 
     scheduler = Scheduler.init();
 
