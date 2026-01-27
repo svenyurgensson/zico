@@ -1,0 +1,21 @@
+.{
+    .name = .blinky_zico_mz,
+    .version = "0.0.0",
+    .fingerprint = 0xbb4e0e5807f9be4c, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .microzig = .{
+            .url = "https://github.com/ZigEmbeddedGroup/microzig/archive/refs/heads/master.zip",
+            .hash = "microzig-0.15.0-D20YSdPQ2wAcAkdrGfWzHVlfghpoEoncxTYakDSLTbMX",
+        },
+        .zico = .{
+            // zig fetch --save=ch32 https://github.com/svenyurgensson/zico/archive/refs/heads/master.zip
+            .path = "../..",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
