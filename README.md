@@ -113,6 +113,10 @@ pub fn build(b: *std.Build) void {
 
 Now you can import and use `zico` and `hal` in your `src/main.zig`.
 
+To remain library-agnostic, `zico` requires you to provide a function that returns the current time in milliseconds. This is done by passing a configuration struct to the `scheduler.init()` method. The provided function will be used for all time-related operations, such as `scheduler.delay()`.
+
+In the example below, we use the `hal.time.millis` function provided by the `ch32_zig` HAL.
+
 ```zig
 const std = @import("std");
 const hal = @import("hal"); // Import the HAL module provided by ch32_zig
@@ -157,8 +161,11 @@ pub fn main() !void {
     const clock = hal.clock.setOrGet(.hsi_max);
     hal.time.init(clock);
 
-    // Initialize the scheduler
-    scheduler = Scheduler.init();
+    // Initialize the scheduler, providing a timer function.
+    // The get_time_ms function must return the current time in milliseconds as a u32.
+    scheduler = Scheduler.init(.{
+        .get_time_ms = hal.time.millis,
+    });
 
     // Enable interrupts globally
     hal.interrupts.globalEnable();

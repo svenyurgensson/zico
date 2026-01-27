@@ -1,5 +1,4 @@
 const std = @import("std");
-const hal = @import("hal");
 const task = @import("./task.zig");
 const sync = @import("./sync.zig");
 const syscall = @import("./syscall.zig");
@@ -7,6 +6,16 @@ const syscall = @import("./syscall.zig");
 pub const Channel = sync.Channel;
 pub const Semaphore = sync.Semaphore;
 pub const TaskDef = task.TaskDef;
+
+const call_conv: std.builtin.CallingConvention = .{ .riscv32_interrupt = .{ .mode = .machine } };
+pub const InterruptHandler = @as(*const fn () callconv(call_conv) void, @ptrCast(&switchTaskISR));
+
+pub const GetTimeFn = *const fn () u32;
+pub const ZicoConfig = struct {
+    get_time_ms: GetTimeFn,
+};
+
+var get_time_ms: GetTimeFn = undefined;
 
 // This is the idle task. It runs when no other tasks are ready to run.
 // It simply yields control back to the scheduler immediately, preventing the CPU from
@@ -100,7 +109,7 @@ export fn zico_scheduler_logic(current_sp: u32) *const task.TSS {
         },
     }
 
-    const current_ms = hal.time.millis();
+    const current_ms = get_time_ms();
     // Use wrapping subtraction to correctly handle timer overflow.
     const elapsed_ms_u32 = current_ms -% self.last_timer_update_ms;
 
@@ -184,12 +193,24 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
         var stacks_storage: [TOTAL_STACK_SIZE]u8 align(16) = undefined; // Changed align(8) to align(16)
         var scheduler_stack: [SCHEDULER_STACK_SIZE]u8 align(8) = undefined;
 
-        pub fn init() Self {
+        pub fn init(config: anytype) Self {
+            comptime {
+                if (!@hasField(@TypeOf(config), "get_time_ms")) {
+                    @compileError("Config must have 'get_time_ms' field");
+                }
+            }
             var self = Self{
                 .tasks = &tasks_storage,
                 .current_task = 0,
                 .last_timer_update_ms = 0,
             };
+
+            const Wrap = struct {
+                fn internal() u32 {
+                    return config.get_time_ms();
+                }
+            };
+            get_time_ms = &Wrap.internal;
 
             const scheduler_stack_top = @intFromPtr(&scheduler_stack) + SCHEDULER_STACK_SIZE;
             // saving scheduler stack ptr to mscratch
@@ -216,7 +237,7 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
                 next_stack_addr += total_task_stack_size;
             }
 
-            self.last_timer_update_ms = hal.time.millis();
+            self.last_timer_update_ms = get_time_ms();
 
             return self;
         }
@@ -298,8 +319,6 @@ pub fn Zico(comptime task_defs: []const task.TaskDef) type {
         }
     };
 }
-
-pub const InterruptHandler = @as(hal.interrupts.Handler, @ptrCast(&switchTaskISR));
 
 pub export fn switchTaskISR() align(4) callconv(.naked) void {
     asm volatile (

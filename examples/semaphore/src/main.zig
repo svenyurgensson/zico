@@ -66,7 +66,9 @@ pub fn main() !void {
     const clock = hal.clock.setOrGet(.hsi_max);
     hal.time.init(clock);
 
-    scheduler = Scheduler.init();
+    scheduler = Scheduler.init(.{
+        .get_time_ms = hal.time.millis,
+    });
 
     hal.interrupts.globalEnable();
 

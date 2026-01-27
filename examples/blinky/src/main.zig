@@ -29,7 +29,7 @@ const AppTaskDefs = [_]zico.TaskDef{
     .{ .name = "debug", .func = &debug_task, .stack_size = 4 * 8 },
 };
 
-// Генерируем тип планировщика
+// Генерируем тип планировщика, передавая конфигурацию времени
 pub const Scheduler = zico.Zico(&AppTaskDefs);
 // Глобальная переменная для экземпляра планировщика
 pub var scheduler: Scheduler = undefined;
@@ -51,7 +51,9 @@ pub fn main() !void {
     hal.debug.sdi_print.init();
     _ = try hal.debug.sdi_print.write("Hello, World!\r\n");
 
-    scheduler = Scheduler.init();
+    scheduler = Scheduler.init(.{
+        .get_time_ms = hal.time.millis,
+    });
 
     hal.interrupts.globalEnable();
 

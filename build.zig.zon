@@ -1,12 +1,7 @@
 .{
     .name = .zico,
     .version = "1.0.0",
-    .dependencies = .{
-        .ch32 = .{
-            .url = "https://github.com/ghostiam/ch32_zig/archive/refs/heads/master.zip",
-            .hash = "ch32_zig-0.0.0-KNlt8xf_mgDXNfaFumvgABLp5MuEFkSPMJT4sOI0xGRZ",
-        },
-    },
+    .dependencies = .{},
     .minimum_zig_version = "0.15.2",
     .fingerprint = 0xf11d2be654f96636,
     .paths = .{

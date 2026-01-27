@@ -8,7 +8,8 @@ GEMINI.md
 .geminiignore
 mise.toml
 *.s
-*.asm--
-*.pdf--
+*.asm
+*.pdf
 *.gdb
 .gdbinit
+package.json
