@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.15.2",
     .dependencies = .{
         .microzig = .{
-            .url = "https://github.com/ZigEmbeddedGroup/microzig/archive/refs/heads/master.zip",
-            .hash = "microzig-0.15.0-D20YSdPQ2wAcAkdrGfWzHVlfghpoEoncxTYakDSLTbMX",
+            .url = "https://github.com/ZigEmbeddedGroup/microzig/archive/40897f2fc8d716f637c8aa00d5e9a57d182589ab.zip",
+            .hash = "microzig-0.15.0-D20YSYc03QDyk42tBHuGULsjgz6khPG-6ESJ_FD3Gn0P",
         },
         .zico = .{
             // zig fetch --save=ch32 https://github.com/svenyurgensson/zico/archive/refs/heads/master.zip

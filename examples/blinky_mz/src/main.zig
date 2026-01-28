@@ -5,9 +5,10 @@ const hal = microzig.hal;
 const cpu = microzig.cpu;
 const peripherals = microzig.chip.peripherals;
 const PFIC = peripherals.PFIC;
+const RCC = peripherals.RCC;
 
 const led = if (cpu.cpu_name == .@"qingkev2-rv32ec")
-    hal.gpio.Pin.init(3, 4) // PC0
+    hal.gpio.Pin.init(3, 4) // PD4
 else
     hal.gpio.Pin.init(0, 3); // PA3
 
@@ -29,7 +30,7 @@ var systick_millis: u32 = 0;
 fn sys_tick_handler() callconv(cpu.riscv_calling_convention) void {
     PFIC.STK_CMPLR.raw +%= systicks_per.ms;
     // Clear the trigger state for the next interrupt.
-    peripherals.PFIC.STK_SR.modify(.{ .CNTIF = 0 });
+    PFIC.STK_SR.modify(.{ .CNTIF = 0 });
 
     systick_millis +%= 1;
 }
@@ -38,7 +39,9 @@ const hsi_frequency: u32 = 24_000_000;
 
 fn sys_tick_setup() void {
     systicks_per.us = @truncate(hsi_frequency / 1_000_000);
-    systicks_per.ms = @truncate(hsi_frequency / 1_000);
+    systicks_per.ms = @truncate(hsi_frequency / 1_000_00);
+
+    hal.rcc_init_hsi_pll();
 
     // Configure SysTick
     // Reset configuration.
