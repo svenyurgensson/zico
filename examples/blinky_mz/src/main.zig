@@ -34,23 +34,11 @@ fn sys_tick_handler() callconv(cpu.riscv_calling_convention) void {
     systick_millis +%= 1;
 }
 
-fn divOptimized(n: u32, d: u32) u32 {
-    var q: u32 = 0;
-    var r: u32 = n;
-
-    while (r >= d) {
-        r -= d;
-        q += 1;
-    }
-
-    return q;
-}
+const hsi_frequency: u32 = 24_000_000;
 
 fn sys_tick_setup() void {
-    const hsi_frequency: u32 = 24_000_000;
-
-    systicks_per.us = @truncate(divOptimized(hsi_frequency, 1_000_000));
-    systicks_per.ms = @truncate(divOptimized(hsi_frequency, 1_000));
+    systicks_per.us = @truncate(hsi_frequency / 1_000_000);
+    systicks_per.ms = @truncate(hsi_frequency / 1_000);
 
     // Configure SysTick
     // Reset configuration.

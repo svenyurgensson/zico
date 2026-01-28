@@ -11,7 +11,9 @@ It provides a simple, cooperative multitasking environment with minimal memory f
 -   **Compile-Time Task Definition:** Tasks are defined at compile-time, allowing for optimized memory layout and type-safe task management.
 -   **Simple API:** A minimal set of functions for task control.
 
-## How to use with `ch32_zig` library
+<details>
+<summary><h2>How to use with `ch32_zig` library</h2></summary>
+
 
 This guide explains how to add `zico` as a dependency to your own Zig project, specifically when using the [ch32_zig](https://github.com/ghostiam/ch32_zig) HAL library.
 
@@ -109,7 +111,7 @@ pub fn build(b: *std.Build) void {
 }
 ```
 
-### 3. Usage in Your Code (`src/main.zig`)
+### Usage in Your Code (`src/main.zig`)
 
 Now you can import and use `zico` and `hal` in your `src/main.zig`.
 
@@ -174,6 +176,55 @@ pub fn main() !void {
     scheduler.runLoop();
 }
 ```
+</details>
+
+
+<details>
+<summary><h2>How to use with `microzig` library</h2></summary>
+
+
+This guide explains how to add `zico` as a dependency to your own Zig project, specifically when using the [microzig](https://github.com/ZigEmbeddedGroup/microzig) HAL library.
+
+### 1. Add `zico` and `microzig` to your `build.zig.zon`
+
+First, you need to add `zico` and `microzig` to your project's dependencies in the `build.zig.zon` file.
+
+```zig
+.{
+    .name = .blinky_zico_mz,
+    .version = "0.0.0",
+    .fingerprint = 0xbb4e0e5807f9be4c, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .microzig = .{
+            .url = "https://github.com/ZigEmbeddedGroup/microzig/archive/refs/heads/master.zip",
+            .hash = "microzig-0.15.0-D20YSdPQ2wAcAkdrGfWzHVlfghpoEoncxTYakDSLTbMX",
+        },
+        .zico = .{
+            // zig fetch --save=ch32 https://github.com/svenyurgensson/zico/archive/refs/heads/master.zip
+            .path = "../..",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
+```
+### 2. Configure `build.zig`
+
+Next, configure your `build.zig` to make `zico` and `microzig` available to your firmware executable.
+
+Take a look at example: [mlinky_mz](examples/blinky_mz/build.zig)
+
+
+### Usage in Your Code (`src/main.zig`)
+
+Take a look at example: [mlinky_mz](examples/blinky_mz/src/main.zig)
+
+
+</details>
 
 ### Debugging with VS Code
 

@@ -32,7 +32,6 @@ pub fn build(b: *std.Build) void {
     } else {
         firmware.artifact.root_module.addImport("zico", zico_module);
     }
-    //firmware.artifact.root_module.addImport("zico", zico_module);
 
     mb.install_firmware(firmware, .{ .format = .elf });
 
